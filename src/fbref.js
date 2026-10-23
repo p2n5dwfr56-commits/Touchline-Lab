@@ -203,14 +203,106 @@ function fbReadTable(rows) {
   return { players, found };
 }
 
+/* ---------- Club history (FBref club page: Domestic Leagues Results, International Cup Results, Season-by-Season Summary) ---------- */
+const fbSeasonKey = (s) => { const m = String(s || '').match(/^(\d{4})-(\d{4})$/); return m ? m[1] + '/' + m[2].slice(2) : ''; };
+// One paste can hold all three tables: find each header and read its season rows
+function fbHistoryTables(text) {
+  const rows = fdParseCSV(String(text || '').replace(/^\uFEFF/, ''));
+  const out = {};
+  let cur = null, head = null;
+  rows.forEach((r) => {
+    const c = r.map((x) => String(x || '').trim());
+    if (c[0] === 'Season' && c[1] === 'Squad') {
+      cur = c.includes('Domestic Leagues') ? 'summary' : c.includes('LgRank') && c.includes('Country') ? 'league' : c.includes('LgRank') ? 'europe' : null;
+      head = c;
+      if (cur) out[cur] = out[cur] || [];
+      return;
+    }
+    if (!cur || !fbSeasonKey(c[0])) return;
+    const o = {};
+    head.forEach((k, i) => (o[k] = c[i] || ''));
+    out[cur].push(o);
+  });
+  return out;
+}
+const fbIsHistory = (text) => { const t = fbHistoryTables(text); return !!(t.league || t.europe || t.summary); };
+function attachFbHistory(db, teamId, text) {
+  const t = fbHistoryTables(text);
+  const key = fbTeamKey(db.teamById[teamId] ? db.teamById[teamId].name : teamId);
+  const H = ((db.fbHistory = db.fbHistory || {})[key] = db.fbHistory[key] || { league: {}, europe: {}, summary: {} });
+  const n = (v) => { const x = parseInt(String(v).replace(/[^0-9-]/g, ''), 10); return Number.isFinite(x) ? x : null; };
+  (t.league || []).forEach((r) => { H.league[fbSeasonKey(r.Season)] = { comp: r.Comp.replace(/^\d+\.\s*/, ''), pos: n(r.LgRank), mp: n(r.MP), w: n(r.W), d: n(r.D), l: n(r.L), gf: n(r.GF), ga: n(r.GA), pts: n(r.Pts), att: n(r.Attendance), scorer: r['Top Team Scorer'], gk: r.Goalkeeper, notes: r.Notes }; });
+  (t.europe || []).forEach((r) => { H.europe[fbSeasonKey(r.Season)] = { comp: r.Comp.replace(/^\d+\.\s*/, ''), stage: r.LgRank, mp: n(r.MP), w: n(r.W), d: n(r.D), l: n(r.L), gf: n(r.GF), ga: n(r.GA), att: n(r.Attendance), scorer: r['Top Team Scorer'], gk: r.Goalkeeper }; });
+  (t.summary || []).forEach((r) => { const k = fbSeasonKey(r.Season); const eu = Object.entries(r).find(([h]) => /^Int'?l Cups/i.test(h)); H.summary[k] = { league: r['Domestic Leagues'] || '', europe: eu ? eu[1] : '' }; });
+  return { league: Object.keys(H.league).length, europe: Object.values(H.summary).filter((x) => x.europe).length + Object.keys(H.europe).filter((k) => !(H.summary[k] && H.summary[k].europe)).length, from: Object.keys(H.league).sort()[0] };
+}
+
+/* ---------- Attendances: FBref league tables (one per season) and club histories ---------- */
+// season ("2023/24") -> team key -> { name, att }; kept for the whole visit, whichever season is on screen
+const ATT = {};
+function fbLeagueTableRows(text) {
+  const rows = fdParseCSV(String(text || '').replace(/^\uFEFF/, ''));
+  const hi = rows.findIndex((r) => { const c = r.map((x) => String(x || '').trim()); return c.includes('Squad') && c.includes('Pts') && c.includes('Attendance') && (c.includes('Rk') || c.includes('MP')); });
+  if (hi < 0) return null;
+  const H = rows[hi].map((x) => String(x || '').trim());
+  const iS = H.indexOf('Squad'), iA = H.indexOf('Attendance');
+  return rows.slice(hi + 1).map((r) => ({ name: String(r[iS] || '').trim(), att: parseInt(String(r[iA] || '').replace(/[^0-9]/g, ''), 10) })).filter((x) => x.name && x.name !== 'Squad');
+}
+const fbIsLeagueTable = (text) => !!fbLeagueTableRows(text) && !fbIsHistory(text);
+// Wikipedia season articles ("2023–24 Scottish Premiership" → Attendances): a table copied from the page
+// arrives tab-separated, with a Team (or Club) column and an Average column
+function wikiAttendanceRows(text) {
+  const lines = String(text || '').split(/\r?\n/);
+  const split = (l) => (l.includes('\t') ? l.split('\t') : l.split(/\s{2,}/)).map((x) => x.trim());
+  const hi = lines.findIndex((l) => { const c = split(l).map((x) => x.toLowerCase()); return c.some((x) => /^(team|club)$/.test(x)) && c.some((x) => /^average/.test(x)); });
+  if (hi < 0) return null;
+  const H = split(lines[hi]).map((x) => x.toLowerCase());
+  const iT = H.findIndex((x) => /^(team|club)$/.test(x)), iA = H.findIndex((x) => /^average/.test(x));
+  const out = [];
+  for (const l of lines.slice(hi + 1)) {
+    const c = split(l);
+    if (c.length < 2 || /^total|^league total/i.test(c[iT] || c[0])) { if (out.length && !l.trim()) break; continue; }
+    const name = String(c[iT] || '').replace(/\[[^\]]*\]/g, '').replace(/[†‡*]/g, '').trim();
+    const att = parseInt(String(c[iA] || '').replace(/\[[^\]]*\]/g, '').replace(/[^0-9]/g, ''), 10);
+    if (name && /[a-z]/i.test(name) && Number.isFinite(att) && att > 0) out.push({ name, att });
+  }
+  return out.length >= 3 ? out : null;
+}
+const fbIsWikiAttendance = (text) => !!wikiAttendanceRows(text) && !fbLeagueTableRows(text);
+// The season a league table is for: "2023-2024" in the pasted text, else the season on screen when it was pasted
+const fbTextSeason = (text) => {
+  const m = String(text || '').match(/(\d{4})-(\d{4})/);
+  if (m && +m[2] === +m[1] + 1) return m[1] + '/' + m[2].slice(2);
+  const w = String(text || '').match(/(\d{4})\s*[–-]\s*(\d{2})\b/); // Wikipedia: 2023–24
+  return w && (+w[1] + 1) % 100 === +w[2] ? w[1] + '/' + w[2] : '';
+};
+function attachLeagueAttendance(text, fallbackSeason) {
+  const season = fbTextSeason(text) || fallbackSeason;
+  const rows = fbLeagueTableRows(text) || wikiAttendanceRows(text) || [];
+  if (!season) return { season: '', teams: 0 };
+  const S0 = (ATT[season] = ATT[season] || {});
+  let n = 0;
+  rows.forEach((r) => { if (Number.isFinite(r.att) && r.att > 0) { S0[fbTeamKey(r.name)] = { name: r.name, att: r.att }; n++; } });
+  return { season, teams: n };
+}
+function noteHistoryAttendance(db) {
+  Object.entries(db.fbHistory || {}).forEach(([key, Hh]) => Object.entries(Hh.league || {}).forEach(([season, f]) => {
+    if (f.att == null || f.att <= 0) return;
+    const S0 = (ATT[season] = ATT[season] || {});
+    if (!S0[key]) S0[key] = { name: db.teamById && Object.values(db.teamById).find((t) => fbTeamKey(t.name) === key) ? Object.values(db.teamById).find((t) => fbTeamKey(t.name) === key).name : key, att: f.att };
+  }));
+}
+
 function attachFbref(db, teamId, texts) {
   const errors = [];
   let tables = 0, rowsRead = 0;
   db.seasonPS = db.seasonPS || {};
   const slug = (s) => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   const fields = new Set();
-  let fixtures = null, records = null;
+  let fixtures = null, records = null, history = null, attendance = null;
   texts.forEach((t) => {
+    if (fbIsHistory(t.text)) { history = attachFbHistory(db, teamId, t.text); noteHistoryAttendance(db); tables++; return; }
+    if (fbIsLeagueTable(t.text) || fbIsWikiAttendance(t.text)) { attendance = attachLeagueAttendance(t.text, db.season); tables++; return; }
     const rows = fbParse(t.text);
     if (!fbIsTable(rows) && fbIsFixtures(rows)) { fixtures = attachFixtures(db, teamId, rows); tables++; return; }
     if (!fbIsTable(rows) && fbIsRecords(rows)) { records = attachRecords(db, teamId, rows); tables++; return; }
@@ -243,7 +335,7 @@ function attachFbref(db, teamId, texts) {
   // Drop players who did not play
   Object.keys(db.seasonPS).forEach((id) => { if (db.players[id] && db.players[id].team === teamId && !(db.seasonPS[id].min > 0)) { delete db.seasonPS[id]; delete db.players[id]; } });
   db.hasPlayers = Object.keys(db.players).length > 0;
-  return { tables, rowsRead, fields: [...fields], errors, fixtures, records };
+  return { tables, rowsRead, fields: [...fields], errors, fixtures, records, history, attendance };
 }
 
 if (typeof module !== 'undefined') module.exports = { fbParse, fbIsTable, fbIsFixtures, fbIsRecords, fbReadTable, attachFbref };

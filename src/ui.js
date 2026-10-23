@@ -8,7 +8,7 @@ const S = {
   tab: 'overview', team: 'ABE', venue: 'all', range: 'season', cmp: 'CEL',
   heat: 'all', shots: 'for', group: 'all', per90: true, sort: 'min', player: null,
   cmpMode: 'teams', pA: null, pB: null, match: null, act: 'pass', form: null, shape: 'plan',
-  opp: null, oppSort: 'next', oppScope: 'league', comp: 'league', loss: null, lossShow: 'shot', bwSort: 'wins', impMetric: 'rating', impPlayer: null, raceN: '5', kpPeriod: '1',
+  opp: null, oppSort: 'next', oppScope: 'league', comp: 'league', loss: null, lossShow: 'shot', bwSort: 'wins', impMetric: 'rating', impPlayer: null, raceN: '5', kpPeriod: '1', gWin: '76', gSide: 'a',
 };
 const TABS = [['overview', 'Overview'], ['team', 'Team analysis'], ['press', 'Without the ball'], ['tactics', 'Tactics'], ['players', 'Players'], ['key', 'Key players'], ['compare', 'Compare'], ['opponents', 'Opponents'], ['seasons', 'Seasons'], ['matches', 'Matches'], ['ask', 'Ask AI'], ['data', 'Data']];
 
@@ -632,28 +632,7 @@ function teamBasics(grid, T, ms) {
     h('thead', null, h('tr', null, h('th', { class: 'l', text: '' }), rows.map(([l]) => h('th', { text: l })))),
     h('tbody', null, lines.map(([l, v, d]) => h('tr', { style: { cursor: 'default' } }, h('td', { class: 'l', text: l }), v.map((x) => h('td', { text: typeof x === 'number' ? fmt(x, d == null ? 2 : d) : x == null ? '–' : x })))))))));
 
-  // When goals happen, and scoring first (needs goal minutes: Sportmonks or API-Football)
-  const withT = ms.filter((m) => (m.timeline || []).some((e) => e.kind === 'goal') || (goalsFor(m, T) === 0 && goalsAg(m, T) === 0 && m.timeline && m.timeline.length));
-  if (withT.length >= 3) {
-    const bins = [[1, 15], [16, 30], [31, 45], [46, 60], [61, 75], [76, 90]].map(([a, b]) => ({ l: a + '–' + b + "'", f: 0, a: 0, lo: a, hi: b }));
-    let first = { f: [], a: [], none: [] };
-    withT.forEach((m) => {
-      const goals = m.timeline.filter((e) => e.kind === 'goal').sort((x, y) => x.min - y.min);
-      goals.forEach((e) => { const k = bins.findIndex((b) => e.min <= b.hi); const b = bins[k < 0 ? 5 : k]; if (e.team === T) b.f++; else b.a++; });
-      (goals.length ? (goals[0].team === T ? first.f : first.a) : first.none).push(m);
-    });
-    const max = Math.max(1, ...bins.map((b) => Math.max(b.f, b.a)));
-    grid.append(card('When goals happen', `${teamName(T)} goals scored and conceded by 15-minute period (stoppage time counts in the period it follows) · ${withT.length} matches`,
-      h('div', { class: 'ask-bars' }, bins.map((b) => h('div', { class: 'ask-bar' }, h('span', { class: 'ask-bar-l', text: b.l }),
-        h('span', { class: 'ask-bar-t' }, h('i', { style: { width: (100 * b.f) / max + '%', background: A } }), h('i', { style: { width: (100 * b.a) / max + '%', background: B } })),
-        h('span', { class: 'ask-bar-v', text: b.f + ' · ' + b.a })))),
-      legend([['Scored', A], ['Conceded', B]])));
-    const rec = (list) => { const n = list.length, p = list.reduce((s, m) => s + pts(m), 0); const w = list.filter((m) => result(m, T) === 'W').length, d = list.filter((m) => result(m, T) === 'D').length; return { n, w, d, l: n - w - d, ppg: n ? p / n : NaN }; };
-    const R = [['Scored first', rec(first.f)], ['Conceded first', rec(first.a)], ['Goalless', rec(first.none)]].filter(([, r]) => r.n);
-    grid.append(card('Scoring first', 'What happens once the first goal goes in', h('div', { class: 'tbl-wrap' }, h('table', null,
-      h('thead', null, h('tr', null, ['', 'Matches', 'W', 'D', 'L', 'Pts / game'].map((c, i) => h('th', { class: i === 0 ? 'l' : '', text: c })))),
-      h('tbody', null, R.map(([l, r]) => h('tr', { style: { cursor: 'default' } }, h('td', { class: 'l', text: l }), h('td', { text: r.n }), h('td', { text: r.w }), h('td', { text: r.d }), h('td', { text: r.l }), h('td', null, h('b', { text: fmt(r.ppg, 2) })))))))));
-  }
+  goalTiming(grid, T, ms);
 
   // Match by match
   const useXg = ms.length && ms.every((m) => has(m.ts[T].xg) && has(m.ts[T].xga));
@@ -679,6 +658,70 @@ function teamBasics(grid, T, ms) {
       c.append(legend([['Possession %', css('--c1'), 'line']]));
     }
   }
+}
+
+/* ---------- Goal timing ---------- */
+// Goals in a match with the minute on the clock before stoppage time (45+2 counts as 45, in the first half)
+function matchGoals(m) {
+  const tl = (m.timeline || []).filter((e) => e.kind === 'goal');
+  if (tl.length) return tl.map((e) => ({ team: e.team, bm: e.bm != null ? e.bm : e.min, min: e.min }));
+  if (m.events && m.events.length) return m.events.filter((e) => e.type === 'shot' && e.out === 'goal' && e.per <= 4).concat(m.ogs || []).map((e) => {
+    const raw = Math.floor(e.t / 60) + 1, cap = { 1: 45, 2: 90, 3: 105, 4: 120 }[e.per];
+    return { team: e.team, bm: Math.min(cap, raw), min: raw };
+  });
+  return [];
+}
+// A match counts when we know its goal times: it has a timeline or events, and the goals add up
+const timedMatch = (m) => { const g = matchGoals(m); return g.length === m.hg + m.ag && ((m.timeline && m.timeline.length) || (m.events && m.events.length) || g.length); };
+const G_WIN = [['1', "0–15'", 1, 15], ['16', "16–30'", 16, 30], ['31', "31–45'", 31, 45], ['46', "46–60'", 46, 60], ['61', "61–75'", 61, 75], ['76', "76–90'", 76, 90], ['h1', '1st half', 1, 45], ['h2', '2nd half', 46, 90], ['l30', "Last 30'", 61, 90]];
+const inWin = (bm, w) => (w[3] === 90 ? bm >= w[2] && bm <= 130 : bm >= w[2] && bm <= w[3]); // late windows take stoppage and extra time
+function goalSplit(ms, T, w) {
+  const tm = ms.filter(timedMatch);
+  let f = 0, a = 0, fAll = 0, aAll = 0;
+  tm.forEach((m) => matchGoals(m).forEach((g) => { const mine = g.team === T; if (mine) fAll++; else aAll++; if (inWin(g.bm, w)) { if (mine) f++; else a++; } }));
+  return { n: tm.length, f, a, fAll, aAll, fPct: fAll ? (100 * f) / fAll : NaN, aPct: aAll ? (100 * a) / aAll : NaN };
+}
+function goalTiming(grid, T, ms) {
+  const tm = ms.filter(timedMatch);
+  if (tm.length < 2) return;
+  const A = css('--team-a'), B = css('--ink-2');
+  const pts = (m) => (result(m, T) === 'W' ? 3 : result(m, T) === 'D' ? 1 : 0);
+  const bins = G_WIN.slice(0, 6).map((w) => ({ w, ...goalSplit(tm, T, w) }));
+  const tot = goalSplit(tm, T, ['all', '', 1, 90]);
+  const max = Math.max(1, ...bins.map((b) => Math.max(b.f, b.a)));
+  const pc = (v) => (has(v) ? Math.round(v) + '%' : '–');
+  // The filter: one window, Aberdeen's share, and every club's
+  const w = G_WIN.find((x) => x[0] === S.gWin) || G_WIN[5];
+  const side = S.gSide === 'f' ? 'f' : 'a';
+  const me = goalSplit(tm, T, w);
+  const lg = memo('gwin|' + w[0] + '|' + S.venue + '|' + leagueRange() + '|' + S.comp, () => DB.teams.map((t) => ({ t, s: goalSplit(scoped(t.id, leagueRange()), t.id, w) }))
+    .filter((r) => r.s.n >= 2));
+  const key = side === 'f' ? 'fPct' : 'aPct';
+  const ranked = lg.filter((r) => has(r.s[key])).sort((x, y) => y.s[key] - x.s[key]);
+  const myRank = ranked.findIndex((r) => r.t.id === T) + 1;
+  const headline = `${teamName(T)} ${side === 'f' ? 'scored' : 'conceded'} ${pc(me[key])} of their goals in ${w[1].replace("'", ' minutes').replace('Last 30 minutes', 'the last 30 minutes')} (${side === 'f' ? me.f + ' of ' + me.fAll : me.a + ' of ' + me.aAll})` + (myRank ? ` · ${myRank === 1 ? 'the most' : ordinal(myRank) + ' most'} of ${ranked.length} in the league` : '');
+  const tools = h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
+    seg([['a', 'Conceded'], ['f', 'Scored']], side, (v) => { S.gSide = v; render(); }, 'Goals'),
+    h('select', { 'aria-label': 'Period of the match', onchange: (e) => { S.gWin = e.target.value; render(); } }, G_WIN.map((x) => h('option', { value: x[0], selected: x === w, text: x[1] }))));
+  grid.append(card({ title: 'When goals happen', tools }, `${tm.length} matches with goal times · stoppage time counts in the half it belongs to`,
+    h('p', { class: 'ask-summary', text: headline + '.' }),
+    h('div', { class: 'ask-bars' }, bins.map((b) => h('div', { class: 'ask-bar' + (b.w === w || (w[0] === 'h1' && +b.w[0] <= 31) || (w[0] === 'h2' && +b.w[0] >= 46) || (w[0] === 'l30' && +b.w[0] >= 61) ? ' on' : ''), tabindex: 0 }, h('span', { class: 'ask-bar-l', text: b.w[1] }),
+      h('span', { class: 'ask-bar-t' }, h('i', { style: { width: (100 * b.f) / max + '%', background: A } }), h('i', { style: { width: (100 * b.a) / max + '%', background: B } })),
+      h('span', { class: 'ask-bar-v', text: `${b.f} (${pc(b.fPct)}) · ${b.a} (${pc(b.aPct)})` })))),
+    legend([['Scored (share of goals scored)', A], ['Conceded (share of goals conceded)', B]]),
+    ranked.length >= 3 ? h('div', { class: 'tbl-wrap', style: { marginTop: '12px' } }, h('table', null,
+      h('thead', null, h('tr', null, ['#', 'Team', `Goals ${side === 'f' ? 'scored' : 'conceded'} ${w[1]}`, 'Share of all', 'Per match'].map((c, i) => h('th', { class: i === 1 ? 'l' : '', text: c })))),
+      h('tbody', null, ranked.map((r, i) => h('tr', { class: r.t.id === T ? 'focus' : '', onclick: () => { S.team = r.t.id; render(); }, title: 'Show ' + r.t.name },
+        h('td', { text: i + 1 }), h('td', { class: 'l', text: r.t.name }), h('td', { text: (side === 'f' ? r.s.f : r.s.a) + ' of ' + (side === 'f' ? r.s.fAll : r.s.aAll) }), h('td', null, h('b', { text: pc(r.s[key]) })), h('td', { text: fmt((side === 'f' ? r.s.f : r.s.a) / r.s.n, 2) })))))) : null,
+    h('p', { class: 'note', text: `Totals: ${tot.fAll} scored, ${tot.aAll} conceded. Small numbers swing the percentages a lot; check the counts before reading much into them.` })));
+  // Scoring first
+  const first = { f: [], a: [], none: [] };
+  tm.forEach((m) => { const g = matchGoals(m).sort((x, y) => x.min - y.min); (g.length ? (g[0].team === T ? first.f : first.a) : first.none).push(m); });
+  const rec = (list) => { const n = list.length, p = list.reduce((s, m) => s + pts(m), 0); const wv = list.filter((m) => result(m, T) === 'W').length, d = list.filter((m) => result(m, T) === 'D').length; return { n, w: wv, d, l: n - wv - d, ppg: n ? p / n : NaN }; };
+  const R = [['Scored first', rec(first.f)], ['Conceded first', rec(first.a)], ['Goalless', rec(first.none)]].filter(([, r]) => r.n);
+  grid.append(card('Scoring first', 'What happens once the first goal goes in', h('div', { class: 'tbl-wrap' }, h('table', null,
+    h('thead', null, h('tr', null, ['', 'Matches', 'W', 'D', 'L', 'Pts / game'].map((c, i) => h('th', { class: i === 0 ? 'l' : '', text: c })))),
+    h('tbody', null, R.map(([l, r]) => h('tr', { style: { cursor: 'default' } }, h('td', { class: 'l', text: l }), h('td', { text: r.n }), h('td', { text: r.w }), h('td', { text: r.d }), h('td', { text: r.l }), h('td', null, h('b', { text: fmt(r.ppg, 2) })))))))));
 }
 
 /* ---------- Team analysis ---------- */
@@ -709,6 +752,7 @@ function viewTeam(el) {
 
   // Possession
   grid.append(card('Game states', 'Share of ball-in-play time by phase, with the ball and without it', phaseBlock(a)));
+  goalTiming(grid, T, ms);
 
   // Possession outcomes funnel
   const L = leagueAggs();
@@ -1167,7 +1211,7 @@ function addFbref(texts, teamId, statusEl, opts = {}) {
   if (!r.tables) { say(r.errors[0] || 'No FBref player table found.'); return false; }
   cache.clear();
   if (opts.restore) return true;
-  if (!opts.nosave) saveFbref(teamId, teamName(teamId), texts);
+  if (!opts.nosave) saveFbref(teamId, teamName(teamId), texts.map((t) => ((fbIsLeagueTable(t.text) || fbIsWikiAttendance(t.text)) && !fbTextSeason(t.text) && DB.season ? { ...t, text: 'Season ' + DB.season.slice(0, 4) + '-' + (+DB.season.slice(0, 4) + 1) + '\n' + t.text } : t)));
   const n = Object.values(DB.players).filter((p) => p.team === teamId && DB.seasonPS[p.id]).length;
   const parts = [];
   if (r.fields.length) parts.push(`${r.fields.map((f) => FB_FIELD_NAMES[f] || f).join(', ')} for ${r.rowsRead} ${teamName(teamId)} player${r.rowsRead === 1 ? '' : 's'} (${n} in the squad view)`);
@@ -1177,8 +1221,10 @@ function addFbref(texts, teamId, statusEl, opts = {}) {
     if (fx.unmatched.length) parts.push(`not matched to the loaded season (usually cup games): ${fx.unmatched.slice(0, 4).join('; ')}${fx.unmatched.length > 4 ? '…' : ''}`);
   }
   if (r.records) parts.push(`${teamName(teamId)}’s all-time record against ${r.records.clubs} clubs (${r.records.games.toLocaleString('en-GB')} matches)`);
+  if (r.attendance) parts.push(r.attendance.season ? `average home attendances for ${r.attendance.teams} clubs in ${r.attendance.season} (see the Seasons tab)` : 'a league table, but no season: pick the season with Season at the top and paste it again');
+  if (r.history) parts.push(`${teamName(teamId)}’s club history: ${r.history.league} league seasons from ${r.history.from}` + (r.history.europe ? ` and ${r.history.europe} European campaigns` : '') + ' (see the Seasons tab)');
   S.team = teamId; S.player = null; S.sort = 'min'; S.per90 = true; S.form = null; S.opp = null;
-  S.tab = r.fields.length ? 'players' : r.records ? 'opponents' : 'tactics';
+  S.tab = r.fields.length ? 'players' : r.records ? 'opponents' : r.history || r.attendance ? 'seasons' : 'tactics';
   render();
   flash('Added ' + parts.join('. ') + '.' + (r.errors.length ? ' ' + r.errors.join(' ') : '') + ' Paste more FBref tables in the Data tab to fill in more.');
   return true;
@@ -1266,7 +1312,7 @@ function importTexts(texts, statusEl, opts = {}) {
     const t = f.text.replace(/^﻿/, '').trimStart();
     if (t[0] === '[' || t[0] === '{') { const data = JSON.parse(t); if (smIsBundle(data)) sm.push({ name: f.name, text: f.text, data }); else if (data && data.source === 'touchline-events') evb.push(data); else parsed.push({ name: f.name, data }); }
     else if (fdIsCSV(fdParseCSV(t))) csv.push({ name: f.name, rows: fdParseCSV(t) });
-    else if (fbIsTable(fbParse(t)) || fbIsFixtures(fbParse(t)) || fbIsRecords(fbParse(t))) fb.push({ name: f.name, text: t });
+    else if (fbIsHistory(t) || fbIsLeagueTable(t) || fbIsWikiAttendance(t) || fbIsTable(fbParse(t)) || fbIsFixtures(fbParse(t)) || fbIsRecords(fbParse(t))) fb.push({ name: f.name, text: t });
   });
   // Event data (from tools/fetch-statsbomb.mjs): shown for this visit, not saved, so saved season data stays as it is
   if (evb.length) {

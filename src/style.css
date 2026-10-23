@@ -314,3 +314,5 @@ textarea { width: 100%; font-family: var(--font-mono); font-size: 12px; line-hei
 .ask-bar-t { display: flex; flex-direction: column; gap: 2px; }
 .ask-bar-t i { display: block; height: 9px; border-radius: 2px; min-width: 1px; }
 .ask-bar-v { font-variant-numeric: tabular-nums; color: var(--ink-2); white-space: nowrap; }
+.ask-bar.on .ask-bar-l { font-weight: 700; }
+.ask-bar.on { background: var(--surface-2); border-radius: 4px; }

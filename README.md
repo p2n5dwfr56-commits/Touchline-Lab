@@ -204,3 +204,14 @@ responses, into the Data tab. Wyscout's 0–100 coordinates (each team attacking
 left) are scaled onto the 120 × 80 pitch, so every pitch view works. The importer was built and checked
 against kloppy's public Wyscout v3 test match; the downloader's API calls have not been run against a live
 account. Event data is shown for the visit and not saved.
+
+## Club history, goal timing and attendances
+- **Club history:** paste the tables from a club's FBref page (Domestic Leagues Results, International
+  Cup Results, Season-by-Season Summary; one paste can hold all three). The Seasons tab then runs back to
+  2000/01 with top scorers, goalkeepers, attendances, European runs and a League finishes chart.
+- **Goal timing** (Team analysis): goals scored and conceded by 15-minute period, with a filter for any
+  period (or either half, or the last 30 minutes) showing the team's share and every club's ranking.
+  Stoppage time counts in the half it belongs to (45+2 is first half).
+- **Home attendances** (Seasons tab): a line per club by season. Paste FBref's League Table for a season,
+  or the Attendances table copied from that season's Wikipedia article, into the FBref box; a table with no
+  season in it is filed under the season picked at the top.

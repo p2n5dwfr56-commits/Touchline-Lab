@@ -202,7 +202,7 @@ function importApiFootball(files) {
       const type = String(ev.type || '').toLowerCase();
       if (type === 'goal') {
         if (/missed/i.test(ev.detail || '')) return;
-        timeline.push({ min, team: T, kind: 'goal', pl, as, detail: ev.detail || '' });
+        timeline.push({ min, bm: (ev.time && ev.time.elapsed) || min, team: T, kind: 'goal', pl, as, detail: ev.detail || '' });
       } else if (type === 'card') {
         timeline.push({ min, team: T, kind: /red/i.test(ev.detail || '') ? 'red' : 'yellow', pl });
       } else if (type === 'subst' && pl && as && onPitch[T]) {

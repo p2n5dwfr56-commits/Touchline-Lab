@@ -547,7 +547,7 @@ function importStatsBomb(files) {
     Object.keys(minutes).forEach((p) => (minutes[p] = Math.round(minutes[p] / 60)));
     const goalsFor = (id) => evs.filter((e) => (e.type === 'shot' && e.out === 'goal' && e.team === id && e.per <= 4) || (e.type === 'og' && e.team === id)).length;
     const date = mm ? mm.match_date : '';
-    matches.push({ id: mid, round: mm && mm.match_week ? mm.match_week : matches.length + 1, date, home: homeT, away: awayT, hg: goalsFor(homeT), ag: goalsFor(awayT), forms, lineups, subs, minutes, events: evs.filter((e) => e.type !== 'og'), poss });
+    matches.push({ id: mid, round: mm && mm.match_week ? mm.match_week : matches.length + 1, date, home: homeT, away: awayT, hg: goalsFor(homeT), ag: goalsFor(awayT), forms, lineups, subs, minutes, events: evs.filter((e) => e.type !== 'og'), poss, ogs: evs.filter((e) => e.type === 'og').map((e) => ({ team: e.team, t: e.t, per: e.per })) });
   });
   matches.sort((a, b) => (a.date || '').localeCompare(b.date || '') || a.round - b.round);
   return { db: { source: 'import', label: 'Imported StatsBomb data', teams: Object.values(teams), players, matches }, errors };

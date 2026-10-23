@@ -88,7 +88,8 @@ async function savePrimary(texts, label, fbref, manual, layers) {
 async function baseLog() {
   const log = await storeGet('log');
   if (log) return log;
-  if (DB.snapshot && SNAP) return { v: 1, savedAt: Date.now(), label: DB.label, primary: SNAP.primary, fbref: snapshotFbref(DB), layers: (SNAP.layers || []).slice(), manual: [] };
+  const real = (typeof SEASONS !== 'undefined' && SEASONS.real) || DB; // the current season, even while a past one is on screen
+  if (real.snapshot && SNAP) return { v: 1, savedAt: Date.now(), label: real.label, primary: SNAP.primary, fbref: snapshotFbref(real), layers: (SNAP.layers || []).slice(), manual: [] };
   return null;
 }
 async function saveFbref(teamId, teamNameText, texts) {

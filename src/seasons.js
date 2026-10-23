@@ -87,12 +87,21 @@ function seasonRow(db, key) {
 function viewSeasons(el) {
   const key = fbTeamKey(teamName(S.team));
   const all = allSeasons();
-  el.append(h('div', { class: 'hero' }, h('h1', { text: teamName(S.team) }), h('div', { class: 'meta' }, h('span', { text: all.length + ' seasons · league only' }))));
-  if (all.length < 2) {
+  const H = ((SEASONS.real && SEASONS.real.fbHistory) || DB.fbHistory || {})[key] || null; // FBref club history, when pasted
+  el.append(h('div', { class: 'hero' }, h('h1', { text: teamName(S.team) }), h('div', { class: 'meta' }, h('span', { text: Math.max(all.length, H ? Object.keys(H.league).length : 0) + ' seasons · league only' }))));
+  if (all.length < 2 && !H) {
     el.append(card({ title: 'Seasons', span: true }, null, h('p', { class: 'note', style: { marginTop: 0 }, text: 'Only one season is loaded. Add earlier seasons in the Data tab (football-data.co.uk files, free) to compare them here.' })));
     return;
   }
-  const rows = memo('seasons|' + key + '|' + all.length + '|' + (SEASONS.real ? SEASONS.real.matches.length : 0), () => all.map((x) => ({ ...x, r: seasonRow(x.db || seasonDB(x.season), key) })).filter((x) => x.r));
+  const rows = memo('seasons|' + key + '|' + all.length + '|' + (SEASONS.real ? SEASONS.real.matches.length : 0) + '|' + (H ? Object.keys(H.league).length : 0), () => {
+    const out = all.map((x) => ({ ...x, r: seasonRow(x.db || seasonDB(x.season), key) })).filter((x) => x.r);
+    // Older seasons from FBref's club history: results only
+    if (H) Object.entries(H.league).forEach(([season, f]) => {
+      if (out.some((x) => x.season === season) || f.mp == null) return;
+      out.push({ season, fbOnly: true, r: { pos: f.pos, of: null, race: [], players: false, champ: null, a: { n: f.mp, w: f.w, d: f.d, l: f.l, g: f.gf, ga: f.ga, pts: f.pts, mxp: NaN, sh: NaN, sha: NaN, xg: NaN, xga: NaN } } });
+    });
+    return out.sort((a, b) => b.season.localeCompare(a.season));
+  });
   if (!rows.length) { el.append(card({ title: 'Seasons', span: true }, null, h('p', { class: 'note', text: teamName(S.team) + ' is not in the other seasons loaded.' }))); return; }
   const grid = h('div', { class: 'grid' });
   el.append(grid);
@@ -101,18 +110,35 @@ function viewSeasons(el) {
 
   // Table
   const showMkt = rows.some((x) => has(x.r.a.mxp)), showXg = rows.some((x) => has(x.r.a.xg));
-  const head = ['Season', 'Pos', 'P', 'W', 'D', 'L', 'GF', 'GA', 'GD', 'Pts', 'PPG'].concat(showMkt ? ['Mkt xPts / g'] : [], ['Shots / g', 'Shots ag / g'], showXg ? ['xG / g', 'xGA / g'] : [], ['Champions', '']);
+  const hl = (x) => (H && H.league[x.season]) || null, hs = (x) => (H && H.summary[x.season]) || null;
+  const att = (v) => (v == null ? '–' : v < 500 ? 'closed doors' : v.toLocaleString('en-GB'));
+  const head = ['Season', 'Pos', 'P', 'W', 'D', 'L', 'GF', 'GA', 'GD', 'Pts', 'PPG'].concat(showMkt ? ['Mkt xPts / g'] : [], ['Shots / g', 'Shots ag / g'], showXg ? ['xG / g', 'xGA / g'] : [], H ? ['Top scorer', 'Avg attendance', 'In Europe', 'Qualified for'] : [], ['Champions', '']);
   grid.append(card({ title: 'Season by season', span: true }, `${teamName(S.team)} in the league · positions follow the split after 33 rounds · click a season to open it in every tab`,
     h('div', { class: 'tbl-wrap' }, h('table', null, h('thead', null, h('tr', null, head.map((c, i) => h('th', { class: i === 0 || i === head.length - 2 ? 'l' : '', text: c })))),
       h('tbody', null, rows.map((x) => {
         const a = x.r.a, g = (v, d) => fmt(safe(v, a.n), d);
-        return h('tr', { class: x.season === DB.season ? 'focus' : '', onclick: () => { if (loadSeason(x.season)) { S.tab = 'overview'; render(); window.scrollTo({ top: 0 }); } }, title: 'Open ' + x.season },
-          h('td', { class: 'l' }, h('b', { text: x.season }), x.current ? h('span', { class: 'sub', text: ' now' }) : null), h('td', null, h('b', { text: x.r.pos ? ordinal(x.r.pos) : '–' })),
+        const f = hl(x), su = hs(x);
+        return h('tr', { class: x.season === DB.season ? 'focus' : '', style: x.fbOnly ? { cursor: 'default' } : null, onclick: x.fbOnly ? null : () => { if (loadSeason(x.season)) { S.tab = 'overview'; render(); window.scrollTo({ top: 0 }); } }, title: x.fbOnly ? x.season + ' (from FBref: results only)' : 'Open ' + x.season },
+          h('td', { class: 'l' }, h('b', { text: x.season }), x.current ? h('span', { class: 'sub', text: ' now' }) : x.fbOnly ? h('span', { class: 'sub', text: ' FBref' }) : null), h('td', null, h('b', { text: x.r.pos ? ordinal(x.r.pos) : '–' })),
           h('td', { text: a.n }), h('td', { text: a.w }), h('td', { text: a.d }), h('td', { text: a.l }), h('td', { text: a.g }), h('td', { text: a.ga }), h('td', { text: signed(a.g - a.ga, 0) }), h('td', null, h('b', { text: a.pts })), h('td', { text: g(a.pts, 2) }),
           showMkt ? h('td', { text: g(a.mxp, 2) }) : null, h('td', { text: g(a.sh, 1) }), h('td', { text: g(a.sha, 1) }), showXg ? [h('td', { text: g(a.xg, 2) }), h('td', { text: g(a.xga, 2) })] : null,
+          H ? [h('td', { class: 'l', text: f ? f.scorer || '–' : '–' }), h('td', { text: f ? att(f.att) : '–' }), h('td', { class: 'l sub', text: su && su.europe ? su.europe : '' }), h('td', { class: 'l sub', text: f && f.notes ? f.notes.replace(/^→\s*/, '') : '' })] : null,
           h('td', { class: 'l sub', text: (x.r.champ || '') + (x.current && x.r.champ ? ' (leading)' : '') }), h('td', { class: 'sub', text: x.r.players ? 'players' : '' }));
       })))),
-    h('p', { class: 'note', text: 'Seasons marked “players” also have line-ups and player stats (from Sportmonks). Past seasons from football-data.co.uk have no xG. 2019/20 ended early (Covid), so it has fewer matches.' })));
+    h('p', { class: 'note', text: 'Seasons marked “players” also have line-ups and player stats (from Sportmonks). Past seasons from football-data.co.uk have no xG. 2019/20 ended early (Covid), so it has fewer matches.' + (H ? ' Top scorers, attendances and European runs are from FBref’s club history; seasons marked FBref have results only. 2020/21 was played behind closed doors.' : '') })));
+
+  // League finishes, and European campaigns (FBref club history)
+  if (H) {
+    const fin = Object.entries(H.league).filter(([, f]) => f.pos).sort((a, b) => a[0].localeCompare(b[0]));
+    if (fin.length >= 3) grid.append(card({ title: 'League finishes', span: true }, `${teamName(S.team)}’s final league position, ${fin[0][0]} to ${fin[fin.length - 1][0]} · from FBref`, positionChart(fin)));
+    const eu = Object.keys(H.summary).concat(Object.keys(H.europe)).filter((k, i, arr) => arr.indexOf(k) === i && ((H.summary[k] && H.summary[k].europe) || H.europe[k])).sort().reverse();
+    if (eu.length) grid.append(card({ title: 'In Europe', span: true }, `${teamName(S.team)}’s European campaigns · from FBref (match records only where FBref has them)`, h('div', { class: 'tbl-wrap' }, h('table', null,
+      h('thead', null, h('tr', null, ['Season', 'How far', 'Group / league phase', 'P', 'W', 'D', 'L', 'GF', 'GA', 'Top scorer'].map((c, i) => h('th', { class: i <= 2 || i === 9 ? 'l' : '', text: c })))),
+      h('tbody', null, eu.map((k) => { const su = H.summary[k], e = H.europe[k]; return h('tr', { style: { cursor: 'default' } }, h('td', { class: 'l' }, h('b', { text: k })), h('td', { class: 'l', text: su && su.europe ? su.europe : '' }), h('td', { class: 'l sub', text: e ? e.comp + (e.stage ? ' · ' + ({ Lg: 'league phase', GR: 'group stage' }[e.stage] || e.stage) : '') : '' }),
+        ['mp', 'w', 'd', 'l', 'gf', 'ga'].map((f) => h('td', { text: e && e[f] != null ? e[f] : '' })), h('td', { class: 'l sub', text: e && e.scorer ? e.scorer : '' })); }))))));
+  }
+
+  attendanceCard(grid, key);
 
   // Points per game and market expectation by season
   const c1 = card('Points per game by season', 'Actual points per game against what the betting market expected before each match');
@@ -142,11 +168,13 @@ function viewSeasons(el) {
   c2.append(legend([['Scored', A, 'line'], ['Conceded', B, 'line line-dash']]));
 
   // Points race: this season against earlier ones, match by match
-  const pick = rows.slice(0, S.raceN === 'all' ? rows.length : 5);
+  const raceRows = rows.filter((x) => x.r.race && x.r.race.length);
+  if (raceRows.length < 2) return;
+  const pick = raceRows.slice(0, S.raceN === 'all' ? raceRows.length : 5);
   const n = Math.max(...pick.map((x) => x.r.race.length));
   const pal = ['--c1', '--c3', '--c2', '--c4', '--c5'];
   const series = pick.map((x, i) => ({ name: x.season, color: i === 0 ? A : css(pal[(i - 1) % pal.length]), width: i === 0 ? 3 : 1.6, noDots: true, values: Array.from({ length: n }, (_, k) => (k < x.r.race.length ? x.r.race[k] : NaN)) }));
-  const c3 = card({ title: 'Points race', span: true, tools: rows.length > 5 ? seg([['5', 'Last 5 seasons'], ['all', 'All']], S.raceN === 'all' ? 'all' : '5', (v) => { S.raceN = v; render(); }, 'Seasons') : null }, `${teamName(S.team)}’s points after each league match, ${pick[0].season} against earlier seasons`);
+  const c3 = card({ title: 'Points race', span: true, tools: raceRows.length > 5 ? seg([['5', 'Last 5 seasons'], ['all', 'All']], S.raceN === 'all' ? 'all' : '5', (v) => { S.raceN = v; render(); }, 'Seasons') : null }, `${teamName(S.team)}’s points after each league match, ${pick[0].season} against earlier seasons`);
   const b3 = h('div');
   c3.append(b3);
   grid.append(c3);
@@ -165,6 +193,59 @@ function viewSeasons(el) {
   // Players across seasons (seasons with Sportmonks player stats)
   const withP = rows.filter((x) => x.r.players);
   if (withP.length >= 2) playersAcross(grid, withP.slice().reverse());
+}
+
+// Average home attendance by season for every club with figures (FBref)
+function attendanceCard(grid, key) {
+  const seasons = Object.keys(ATT).filter((k) => Object.keys(ATT[k]).length).sort();
+  if (!seasons.length) return;
+  const clubs = {};
+  seasons.forEach((k) => Object.entries(ATT[k]).forEach(([tk, x]) => { clubs[tk] = clubs[tk] || x.name; }));
+  const others = Object.keys(clubs).filter((tk) => tk !== key);
+  const A = css('--team-a'), G = css('--rule-2');
+  const val = (tk, k) => (ATT[k][tk] && ATT[k][tk].att >= 500 ? ATT[k][tk].att : NaN); // 2020/21 was behind closed doors
+  const series = others.map((tk) => ({ name: clubs[tk], color: G, width: 1.2, noDots: true, values: seasons.map((k) => val(tk, k)) }))
+    .concat(clubs[key] ? [{ name: clubs[key], color: A, width: 3, values: seasons.map((k) => val(key, k)) }] : []);
+  const c = card({ title: 'Home attendances', span: true }, `Average league home crowd by season · ${clubs[key] || teamName(S.team)} highlighted${others.length ? ', other clubs in grey' : ''} · from FBref and Wikipedia`);
+  const box = h('div');
+  c.append(box);
+  grid.append(c);
+  lineChart(box, {
+    labels: seasons.map(seasonShort), series, height: 260, zero: false,
+    yFmt: (v) => (v >= 1000 ? Math.round(v / 1000) + 'k' : String(Math.round(v))),
+    tipFor: (i) => [{ v: seasons[i], strong: true }].concat(Object.entries(ATT[seasons[i]]).filter(([, x]) => x.att >= 500).sort((a, b) => b[1].att - a[1].att).slice(0, 12).map(([tk, x]) => ({ color: tk === key ? A : G, v: x.att.toLocaleString('en-GB'), l: x.name }))).concat(Object.values(ATT[seasons[i]]).some((x) => x.att < 500) ? [{ v: 'Behind closed doors (Covid)' }] : []),
+  });
+  c.append(legend([[clubs[key] || teamName(S.team), A, 'line']].concat(others.length ? [['Other clubs', G, 'line']] : [])));
+  const last = seasons.slice().reverse().find((k) => Object.keys(ATT[k]).length >= 3);
+  if (last) {
+    const rows = Object.entries(ATT[last]).sort((a, b) => b[1].att - a[1].att);
+    c.append(h('div', { class: 'tbl-wrap', style: { marginTop: '10px' } }, h('table', null, h('thead', null, h('tr', null, ['#', 'Club', 'Average home crowd ' + last].map((x, i) => h('th', { class: i === 1 ? 'l' : '', text: x })))),
+      h('tbody', null, rows.map(([tk, x], i) => h('tr', { class: tk === key ? 'focus' : '', style: { cursor: 'default' } }, h('td', { text: i + 1 }), h('td', { class: 'l', text: x.name }), h('td', { text: x.att >= 500 ? x.att.toLocaleString('en-GB') : 'closed doors' })))))));
+  }
+  const missing = seasons.length < 10 || others.length < 5;
+  c.append(h('p', { class: 'note', text: (missing ? 'To add every club, paste each season’s attendance table into the Data tab’s FBref box: either FBref’s League Table (the season page, e.g. fbref.com/en/comps/40/2023-2024/2023-2024-Scottish-Premiership-Stats, “Regular season” → Share & Export → Get table as CSV), or the Attendances table from the Wikipedia article for that season (e.g. “2010–11 Scottish Premier League”), selected and copied from the page. Wikipedia goes back further. ' : '') + 'FBref has attendances from about 2014/15; Wikipedia’s season articles go back further. 2020/21 was played behind closed doors.' }));
+}
+
+// Final league position by season, 1st at the top
+function positionChart(fin) {
+  const n = fin.length, W = 1000, Hh = 220, m = { l: 34, r: 12, t: 14, b: 30 };
+  const maxP = Math.max(12, ...fin.map(([, f]) => f.pos));
+  const X = (i) => m.l + (n <= 1 ? (W - m.l - m.r) / 2 : (i * (W - m.l - m.r)) / (n - 1)), Y = (p) => m.t + ((p - 1) * (Hh - m.t - m.b)) / (maxP - 1);
+  const svg = sv('svg', { viewBox: `0 0 ${W} ${Hh}`, width: '100%', role: 'img', 'aria-label': 'League position by season' });
+  const ax = sv('g', { class: 'axis' });
+  [1, 3, 6, 9, 12].filter((p) => p <= maxP).forEach((p) => { ax.append(sv('line', { x1: m.l, x2: W - m.r, y1: Y(p), y2: Y(p), class: p === 6 ? 'baseline' : 'grid-line' })); ax.append(sv('text', { x: m.l - 6, y: Y(p) + 4, 'text-anchor': 'end', text: ordinal(p) })); });
+  const every = Math.max(1, Math.ceil(n / 14));
+  fin.forEach(([k], i) => { if (i % every === 0 || i === n - 1) ax.append(sv('text', { x: X(i), y: Hh - 8, 'text-anchor': 'middle', text: seasonShort(k) })); });
+  svg.append(ax);
+  const A = css('--team-a');
+  svg.append(sv('path', { d: fin.map(([, f], i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(f.pos).toFixed(1)).join(''), fill: 'none', stroke: A, 'stroke-width': 2, 'stroke-linejoin': 'round' }));
+  fin.forEach(([k, f], i) => {
+    const eu = /europa|uefa|conference|champions/i.test(f.notes || '');
+    const dot = sv('circle', { cx: X(i), cy: Y(f.pos), r: eu ? 5.5 : 4, fill: eu ? A : css('--surface'), stroke: A, 'stroke-width': 2, tabindex: 0 });
+    hover(dot, () => [{ v: k + ' · ' + ordinal(f.pos), strong: true }, { v: `${f.pts} pts from ${f.mp} · ${f.w}-${f.d}-${f.l}` }, f.scorer ? { v: 'Top scorer ' + f.scorer } : null, f.notes ? { v: f.notes.replace(/^→\s*/, 'Qualified: ') } : null].filter(Boolean));
+    svg.append(dot);
+  });
+  return h('div', null, svg, legend([['League position', A, 'line'], ['Qualified for Europe', A]]), h('p', { class: 'note', text: 'Line at 6th marks the top-six split (since 2000/01 the top flight has split after 33 rounds).' }));
 }
 
 // Same club, same player id (club + name), each season's totals

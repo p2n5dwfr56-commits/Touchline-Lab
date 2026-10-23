@@ -124,7 +124,7 @@ function attachSportmonks(db, b) {
         // Every goal, own goals included, is listed under the team it counts for (checked against the scores)
         const scoring = team;
         goalsFor[scoring]++;
-        timeline.push({ min, team: scoring, kind: 'goal', pl: e.type === 'Own Goal' ? null : pid, as: e.type === 'Own Goal' ? null : rel, detail: e.type === 'Penalty' ? 'Penalty' : e.type === 'Own Goal' ? 'Own Goal' : '', ogName: e.type === 'Own Goal' ? e.name : null });
+        timeline.push({ min, bm: e.min || 0, team: scoring, kind: 'goal', pl: e.type === 'Own Goal' ? null : pid, as: e.type === 'Own Goal' ? null : rel, detail: e.type === 'Penalty' ? 'Penalty' : e.type === 'Own Goal' ? 'Own Goal' : '', ogName: e.type === 'Own Goal' ? e.name : null });
         const other = scoring === H ? A : H;
         onPitch[scoring].forEach((x) => { if (m.ps[x]) m.ps[x].onG = (m.ps[x].onG || 0) + 1; });
         onPitch[other].forEach((x) => { if (m.ps[x]) m.ps[x].onGA = (m.ps[x].onGA || 0) + 1; });
