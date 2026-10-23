@@ -51,8 +51,13 @@ function savedSummary(log) {
   const teams = [...new Set(fb.map((f) => f.teamName))];
   return { files: log.primary.map((f) => f.name), label: log.label || '', fbTables: fb.reduce((s, f) => s + f.texts.length, 0), fbTeams: teams, savedAt: log.savedAt };
 }
-async function savePrimary(texts, label) {
-  const log = { v: 1, savedAt: Date.now(), label, primary: texts.map((t) => ({ name: t.name, text: t.text })), fbref: [] };
+// FBref tables saved on top of the same season (same label), so an updated season file keeps them
+async function carriedFbref(label) {
+  const prev = await storeGet('log');
+  return prev && prev.label === label ? prev.fbref || [] : [];
+}
+async function savePrimary(texts, label, fbref) {
+  const log = { v: 1, savedAt: Date.now(), label, primary: texts.map((t) => ({ name: t.name, text: t.text })), fbref: fbref || [] };
   const ok = await storeSet('log', log);
   STORE.meta = ok ? savedSummary(log) : null;
   return ok;

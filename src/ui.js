@@ -1083,10 +1083,21 @@ function importTexts(texts, statusEl, opts = {}) {
   S.range = 'season'; S.player = null; S.match = null; S.pA = null; S.pB = null;
   if (fb.length) addFbref(fb, S.team, statusEl, { ...opts, nosave: true, restore: true });
   if (opts.restore) return true;
-  savePrimary(texts, DB.label).then((ok) => { if (S.tab === 'data') render(); if (!ok) flash('Loaded, but this browser would not save it, so it will be gone when you reload the page.', 'err'); });
   if (errors.length && kind === 'fd') flash(errors[0], 'err');
   S.tab = fb.length ? 'players' : 'overview';
   render();
+  // An updated file for the same season keeps the FBref tables already added to it
+  const label = DB.label, thisDB = DB;
+  carriedFbref(label).then(async (keep) => {
+    if (keep.length && DB === thisDB) {
+      keep.forEach((f) => { if (DB.teamById[f.team]) addFbref(f.texts, f.team, null, { restore: true }); });
+      render();
+      flash(`Updated ${label}. Your ${keep.length} FBref table${keep.length > 1 ? 's were' : ' was'} added back.`);
+    }
+    const ok = await savePrimary(texts, label, keep);
+    if (S.tab === 'data') render();
+    if (!ok) flash('Loaded, but this browser would not save it, so it will be gone when you reload the page.', 'err');
+  });
   return true;
 }
 function savedPanel() {
