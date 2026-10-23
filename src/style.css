@@ -116,6 +116,20 @@ tr.focus td:first-child { box-shadow: inset 3px 0 0 var(--team-a); }
 td .pos { color: var(--muted); font-size: 12px; margin-left: 6px; }
 .badge { display: inline-block; min-width: 34px; text-align: center; font-family: var(--font-display); font-weight: 700; font-size: 12px; letter-spacing: 0.06em; padding: 1px 5px; border-radius: 3px; background: var(--surface-2); color: var(--ink-2); margin-right: 8px; }
 
+/* ---------- Tactics ---------- */
+.board { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(240px, 1fr); gap: 20px; align-items: start; }
+.xi { display: flex; flex-direction: column; gap: 10px; }
+.xi-unit { display: flex; flex-direction: column; gap: 4px; padding-bottom: 10px; border-bottom: 1px solid var(--rule); }
+.xi-unit:last-of-type { border-bottom: 0; }
+.xi-row { display: flex; align-items: baseline; gap: 2px; font-size: 13.5px; }
+.xi-row .badge { flex: none; }
+.xi-name { display: flex; flex-direction: column; min-width: 0; }
+.xi-name a { color: var(--ink); font-weight: 600; text-decoration: none; }
+.xi-name a:hover { text-decoration: underline; }
+.xi-name small { color: var(--muted); font-size: 12px; }
+.subs { margin: 4px 0 0; padding-left: 18px; font-size: 13px; }
+@media (max-width: 820px) { .board { grid-template-columns: 1fr; } }
+
 /* ---------- Charts ---------- */
 svg { display: block; }
 .pitch { width: 100%; height: auto; max-width: 100%; }

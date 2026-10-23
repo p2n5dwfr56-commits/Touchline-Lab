@@ -7,9 +7,9 @@ let DB = null, DEMO = null;
 const S = {
   tab: 'overview', team: 'ABE', venue: 'all', range: 'season', cmp: 'CEL',
   heat: 'all', shots: 'for', group: 'all', per90: true, sort: 'min', player: null,
-  cmpMode: 'teams', pA: null, pB: null, match: null, act: 'pass',
+  cmpMode: 'teams', pA: null, pB: null, match: null, act: 'pass', form: null, shape: 'plan',
 };
-const TABS = [['overview', 'Overview'], ['team', 'Team analysis'], ['players', 'Players'], ['compare', 'Compare'], ['matches', 'Matches'], ['data', 'Data']];
+const TABS = [['overview', 'Overview'], ['team', 'Team analysis'], ['tactics', 'Tactics'], ['players', 'Players'], ['compare', 'Compare'], ['matches', 'Matches'], ['data', 'Data']];
 
 /* ---------- DOM helpers ---------- */
 function h(tag, a, ...kids) {
@@ -378,7 +378,7 @@ function renderChrome() {
   chipEl.className = 'chip' + (DB.source === 'demo' ? '' : ' real');
   chipEl.replaceChildren(h('span', { class: 'dot' }), DB.source === 'demo' ? 'Synthetic demo data' : DB.label);
   chipEl.title = DB.source === 'demo' ? 'Generated sample season. Import real event data in the Data tab.' : '';
-  const teamSel = h('select', { id: 'f-team', onchange: (e) => { S.team = e.target.value; if (S.cmp === S.team) S.cmp = DB.teams.find((t) => t.id !== S.team).id; if (S.range.startsWith('m:')) S.range = 'season'; S.player = null; S.match = null; render(); } },
+  const teamSel = h('select', { id: 'f-team', onchange: (e) => { S.team = e.target.value; if (S.cmp === S.team) S.cmp = DB.teams.find((t) => t.id !== S.team).id; if (S.range.startsWith('m:')) S.range = 'season'; S.player = null; S.match = null; S.form = null; render(); } },
     DB.teams.map((t) => h('option', { value: t.id, selected: t.id === S.team, text: t.name })));
   const ms = teamMatches(S.team);
   const rangeSel = h('select', { id: 'f-range', onchange: (e) => { S.range = e.target.value; render(); } },
@@ -398,7 +398,7 @@ function render() {
   hideTip();
   renderChrome();
   mainEl.replaceChildren();
-  const views = { overview: viewOverview, team: viewTeam, players: viewPlayers, compare: viewCompare, matches: viewMatches, data: viewData };
+  const views = { overview: viewOverview, team: viewTeam, tactics: viewTactics, players: viewPlayers, compare: viewCompare, matches: viewMatches, data: viewData };
   (views[S.tab] || viewOverview)(mainEl);
 }
 

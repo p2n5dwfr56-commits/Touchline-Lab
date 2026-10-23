@@ -1,7 +1,7 @@
 # Touchline Lab
 
 Football analysis app: team and player performance, heatmaps, shot maps, passing networks,
-game states (possession phases), and side-by-side comparison of any two teams or players.
+game states (possession phases), formations and tactical line-ups, and side-by-side comparison of any two teams or players.
 
 ## Run
 Open `dist/index.html` in a browser. No server or install needed.
@@ -10,6 +10,7 @@ After editing anything in `src/`, run `./build.sh` to rebuild `dist/index.html`.
 ## Layout
 - `src/engine.js` – data model, demo-season simulator, StatsBomb importer, all metrics
 - `src/ui.js` – views and charts (plain JS + SVG, no libraries)
+- `src/tactics.js` – Tactics tab: formations, tactical line-up board, shape numbers
 - `src/style.css`, `src/head.html` – styling and page head
 
 ## Data
