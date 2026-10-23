@@ -239,6 +239,7 @@ svg { display: block; }
 .prose p, .prose li { color: var(--ink-2); }
 .prose h3 { font-family: var(--font-display); text-transform: uppercase; letter-spacing: 0.04em; font-size: 17px; margin: 18px 0 6px; }
 .prose code { font-family: var(--font-mono); font-size: 12.5px; background: var(--surface-2); padding: 1px 4px; border-radius: 3px; }
+.prose a { color: var(--c1); text-underline-offset: 2px; overflow-wrap: anywhere; }
 .status { margin-top: 10px; font-size: 13.5px; }
 .status.err { color: var(--bad-text); }
 .status.ok { color: var(--good-text); }
@@ -818,7 +819,7 @@ function progressive(x, y, ex, ey) {
 }
 
 function blankTeam() {
-  const o = { n: 0, w: 0, d: 0, l: 0, pts: 0, g: 0, ga: 0, xg: 0, xga: 0, npxg: 0, npxga: 0, sh: 0, sha: 0, sot: 0, pa: 0, pc: 0, posT: 0, oposT: 0, ppdaPass: 0, ppdaDef: 0, f3p: 0, of3p: 0, prog: 0, f3e: 0, boxe: 0, cross: 0, spxg: 0, hto: 0, defX: 0, defN: 0, fwd: 0, dist: 0, poss: 0, possMid: 0, possF3: 0, possBox: 0, possShot: 0, possGoal: 0, duel: 0, duelW: 0, tkl: 0, int: 0, rec: 0, drb: 0, drbW: 0, trSh: 0, trXg: 0, cor: 0, fls: 0, yc: 0, shIn: 0, ph: {}, oph: {} };
+  const o = { n: 0, w: 0, d: 0, l: 0, pts: 0, g: 0, ga: 0, xg: 0, xga: 0, npxg: 0, npxga: 0, sh: 0, sha: 0, sot: 0, pa: 0, pc: 0, posT: 0, oposT: 0, ppdaPass: 0, ppdaDef: 0, f3p: 0, of3p: 0, prog: 0, f3e: 0, boxe: 0, cross: 0, spxg: 0, hto: 0, defX: 0, defN: 0, fwd: 0, dist: 0, poss: 0, possMid: 0, possF3: 0, possBox: 0, possShot: 0, possGoal: 0, duel: 0, duelW: 0, tkl: 0, int: 0, rec: 0, drb: 0, drbW: 0, trSh: 0, trXg: 0, cor: 0, fls: 0, yc: 0, shIn: 0, mxp: 0, ph: {}, oph: {} };
   PHASES.forEach((k) => { o.ph[k] = 0; o.oph[k] = 0; });
   return o;
 }
@@ -921,7 +922,8 @@ function prepareMatch(m) {
       if (p.shot) s.possShot++;
       if (p.goal) s.possGoal++;
     });
-    s.yc = NaN; // cards are not in the event model
+    s.yc = NaN; // cards and betting odds are not in the event model
+    s.mxp = NaN;
     m.ts[T] = s;
   });
   // players
@@ -987,6 +989,7 @@ const has = (v) => v != null && Number.isFinite(v);
 /* Team metric catalogue. dir: 1 higher is better, -1 lower is better, 0 neutral (style) */
 const TEAM_METRICS = [
   { k: 'ppg', l: 'Points per game', f: (a) => safe(a.pts, a.n), d: 2, dir: 1, grp: 'Results' },
+  { k: 'mxp', l: 'Market expected points', u: '/match', f: (a) => safe(a.mxp, a.n), d: 2, dir: 1, grp: 'Results', tip: 'Points the betting market expected before each match, from bookmaker odds (3 × win chance + draw chance). Compare with points per game to see who is over- or under-performing expectations.' },
   { k: 'g', l: 'Goals', u: '/match', f: (a) => safe(a.g, a.n), d: 2, dir: 1, grp: 'Attack' },
   { k: 'xg', l: 'xG', u: '/match', f: (a) => safe(a.xg, a.n), d: 2, dir: 1, grp: 'Attack' },
   { k: 'npxg', l: 'Non-penalty xG', u: '/match', f: (a) => safe(a.npxg, a.n), d: 2, dir: 1, grp: 'Attack' },
@@ -1047,6 +1050,8 @@ function playerValue(mt, a, per90) { const v = mt.f(a); return per90 && mt.p90 ?
 function prepareDB(db) {
   db.matches.forEach((m) => { if (!m.ts) prepareMatch(m); }); // stats-only sources arrive with ts/ps already built
   db.hasEvents = db.matches.some((m) => m.events && m.events.length);
+  db.hasLineups = db.matches.some((m) => Object.values(m.lineups || {}).some((l) => l.length));
+  db.hasPlayers = Object.keys(db.players || {}).length > 0;
   db.teamById = {};
   db.teams.forEach((t) => (db.teamById[t.id] = t));
   db.teams.sort((a, b) => a.name.localeCompare(b.name));
@@ -1099,7 +1104,7 @@ const AF_ROW_ROLES = {
   FWD: { 1: ['ST'], 2: ['RS', 'LS'], 3: ['RW', 'ST', 'LW'] },
 };
 const AF_POS_GROUP = { G: 'GK', D: 'DEF', M: 'MID', F: 'FWD' };
-const AF_NO_TEAM = ['npxg', 'npxga', 'ppdaPass', 'ppdaDef', 'f3p', 'of3p', 'prog', 'f3e', 'boxe', 'cross', 'spxg', 'hto', 'defX', 'defN', 'fwd', 'dist', 'poss', 'possMid', 'possF3', 'possBox', 'possShot', 'possGoal', 'rec', 'trSh', 'trXg'];
+const AF_NO_TEAM = ['npxg', 'npxga', 'ppdaPass', 'ppdaDef', 'f3p', 'of3p', 'prog', 'f3e', 'boxe', 'cross', 'spxg', 'hto', 'defX', 'defN', 'fwd', 'dist', 'poss', 'possMid', 'possF3', 'possBox', 'possShot', 'possGoal', 'rec', 'trSh', 'trXg', 'mxp'];
 const AF_NO_PLAYER = ['xg', 'npxg', 'xa', 'prog', 'progC', 'f3e', 'boxT', 'rec', 'clr', 'touch', 'cross', 'ca'];
 
 function afNum(v) {
@@ -1329,6 +1334,121 @@ function importApiFootball(files) {
 if (typeof module !== 'undefined') module.exports = { importApiFootball, isApiFootball };
 'use strict';
 /* =====================================================================
+   football-data.co.uk import
+   One CSV per league season, e.g. https://www.football-data.co.uk/mmz4281/2627/SC0.csv
+   (Scottish Premiership 2026/27). Gives results, team match stats where the
+   file has them (shots, shots on target, corners, fouls, cards) and
+   bookmaker odds. No players, line-ups or pitch locations.
+   ===================================================================== */
+
+const FD_DIVISIONS = {
+  SC0: 'Scottish Premiership', SC1: 'Scottish Championship', SC2: 'Scottish League One', SC3: 'Scottish League Two',
+  E0: 'Premier League', E1: 'EFL Championship', E2: 'EFL League One', E3: 'EFL League Two', EC: 'National League',
+  D1: 'Bundesliga', D2: '2. Bundesliga', SP1: 'La Liga', SP2: 'La Liga 2', I1: 'Serie A', I2: 'Serie B', F1: 'Ligue 1', F2: 'Ligue 2',
+  N1: 'Eredivisie', B1: 'Belgian Pro League', P1: 'Primeira Liga', T1: 'Süper Lig', G1: 'Super League Greece',
+};
+// Odds columns, best first: market average, then individual bookmakers.
+const FD_ODDS = [['AvgH', 'AvgD', 'AvgA'], ['BbAvH', 'BbAvD', 'BbAvA'], ['PSH', 'PSD', 'PSA'], ['B365H', 'B365D', 'B365A'], ['WHH', 'WHD', 'WHA']];
+
+function fdParseCSV(text) {
+  text = text.replace(/^﻿/, '');
+  const rows = [];
+  let row = [], f = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { f += '"'; i++; } else q = false; }
+      else f += c;
+    } else if (c === '"') q = true;
+    else if (c === ',') { row.push(f); f = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(f); rows.push(row); row = []; f = '';
+    } else f += c;
+  }
+  if (f || row.length) { row.push(f); rows.push(row); }
+  return rows.filter((r) => r.some((x) => x.trim() !== ''));
+}
+function fdIsCSV(rows) {
+  const h = rows && rows[0] ? rows[0].map((x) => x.trim()) : [];
+  return (h.includes('HomeTeam') && h.includes('AwayTeam') && h.includes('FTHG')) || (h.includes('Home') && h.includes('Away') && h.includes('HG'));
+}
+function fdDate(s) {
+  const m = String(s || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (!m) return '';
+  let y = +m[3];
+  if (y < 100) y += 2000;
+  return `${y}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+}
+const fdSlug = (s) => 'f' + String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+function importFootballData(csvFiles) {
+  // csvFiles: [{ name, rows }] where rows come from fdParseCSV
+  const seasons = {};
+  csvFiles.forEach((f) => {
+    const head = f.rows[0].map((x) => x.trim());
+    const col = (n) => head.indexOf(n);
+    const pick = (...names) => { for (const n of names) { const i = col(n); if (i >= 0) return i; } return -1; };
+    const iH = pick('HomeTeam', 'Home'), iA = pick('AwayTeam', 'Away'), iHG = pick('FTHG', 'HG'), iAG = pick('FTAG', 'AG');
+    const iDiv = col('Div'), iDate = col('Date'), iLeague = col('League'), iSeason = col('Season');
+    const odds = FD_ODDS.map((cols) => cols.map(col)).find((c) => c.every((i) => i >= 0));
+    const stat = { HS: col('HS'), AS: col('AS'), HST: col('HST'), AST: col('AST'), HC: col('HC'), AC: col('AC'), HF: col('HF'), AF: col('AF'), HY: col('HY'), AY: col('AY'), HR: col('HR'), AR: col('AR') };
+    f.rows.slice(1).forEach((r) => {
+      const home = (r[iH] || '').trim(), away = (r[iA] || '').trim();
+      const hg = parseInt(r[iHG], 10), ag = parseInt(r[iAG], 10);
+      if (!home || !away || Number.isNaN(hg) || Number.isNaN(ag)) return; // unplayed or blank rows
+      const date = fdDate(r[iDate]);
+      const div = iDiv >= 0 ? r[iDiv].trim() : iLeague >= 0 ? r[iLeague].trim() : '';
+      let key = iSeason >= 0 ? String(r[iSeason]).trim() : '';
+      if (!key && date) { const y = +date.slice(0, 4), mo = +date.slice(5, 7); const s = mo >= 7 ? y : y - 1; key = `${s}/${String((s + 1) % 100).padStart(2, '0')}`; }
+      const k = div + '|' + key;
+      (seasons[k] = seasons[k] || { div, season: key, rows: [] }).rows.push({ home, away, hg, ag, date, r, stat, odds });
+    });
+  });
+  const keys = Object.keys(seasons);
+  if (!keys.length) return { db: { matches: [] }, errors: ['No played matches found in the CSV file.'] };
+  // One season at a time: take the most recent.
+  keys.sort((a, b) => seasons[b].rows.reduce((m, x) => (x.date > m ? x.date : m), '').localeCompare(seasons[a].rows.reduce((m, x) => (x.date > m ? x.date : m), '')));
+  const S0 = seasons[keys[0]];
+  const errors = keys.length > 1 ? [`Loaded ${FD_DIVISIONS[S0.div] || S0.div} ${S0.season}. The other ${keys.length - 1} season(s) in the files were skipped: load one season at a time.`] : [];
+
+  const teams = {}, matches = [], played = {};
+  S0.rows.sort((a, b) => a.date.localeCompare(b.date));
+  S0.rows.forEach((x, idx) => {
+    const H = fdSlug(x.home), A = fdSlug(x.away);
+    if (!teams[H]) teams[H] = { id: H, name: x.home, style: null };
+    if (!teams[A]) teams[A] = { id: A, name: x.away, style: null };
+    played[H] = (played[H] || 0) + 1; played[A] = (played[A] || 0) + 1;
+    const num = (i) => { if (i < 0) return NaN; const v = parseFloat(x.r[i]); return Number.isFinite(v) ? v : NaN; };
+    let pH = NaN, pD = NaN, pA = NaN;
+    if (x.odds) {
+      const o = x.odds.map(num);
+      if (o.every((v) => v > 1)) { const inv = o.map((v) => 1 / v), s = inv[0] + inv[1] + inv[2]; [pH, pD, pA] = inv.map((v) => v / s); }
+    }
+    const ts = {};
+    [[H, 'H', 'A'], [A, 'A', 'H']].forEach(([T, me, op]) => {
+      const s = blankTeam();
+      Object.keys(s).forEach((k) => { if (typeof s[k] === 'number') s[k] = NaN; });
+      s.n = 1; s.g = T === H ? x.hg : x.ag; s.ga = T === H ? x.ag : x.hg;
+      s.w = s.g > s.ga ? 1 : 0; s.d = s.g === s.ga ? 1 : 0; s.l = s.g < s.ga ? 1 : 0; s.pts = 3 * s.w + s.d;
+      s.sh = num(x.stat[me + 'S']); s.sha = num(x.stat[op + 'S']); s.sot = num(x.stat[me + 'ST']);
+      s.cor = num(x.stat[me + 'C']); s.fls = num(x.stat[me + 'F']); s.yc = num(x.stat[me + 'Y']);
+      s.mxp = T === H ? 3 * pH + pD : 3 * pA + pD;
+      ts[T] = s;
+    });
+    matches.push({
+      id: 'fd' + idx, round: Math.max(played[H], played[A]), date: x.date, home: H, away: A, hg: x.hg, ag: x.ag,
+      forms: {}, lineups: { [H]: [], [A]: [] }, subs: { [H]: [], [A]: [] }, minutes: {}, events: [], poss: [], ts, ps: {}, timeline: [],
+      odds: Number.isFinite(pH) ? { h: pH, d: pD, a: pA } : null,
+    });
+  });
+  const label = `${FD_DIVISIONS[S0.div] || S0.div || 'League'} ${S0.season} (football-data.co.uk)`;
+  return { db: { source: 'football-data', label, teams: Object.values(teams), players: {}, matches }, errors };
+}
+
+if (typeof module !== 'undefined') module.exports = { importFootballData, fdParseCSV, fdIsCSV };
+'use strict';
+/* =====================================================================
    Touchline Lab UI
    ===================================================================== */
 const SVGNS = 'http://www.w3.org/2000/svg';
@@ -1454,8 +1574,18 @@ function rankOf(mt, T) {
 }
 const TM = Object.fromEntries(TEAM_METRICS.map((m) => [m.k, m]));
 const teamHas = (keys, ...aggs) => keys.filter((k) => aggs.every((a) => has(TM[k].f(a))));
+function dataHas() {
+  const parts = ['results', 'team match stats'];
+  if (DB.hasPlayers) parts.push('player stats');
+  if (DB.hasLineups) parts.push('line-ups and formations');
+  return parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1];
+}
 function eventsNote(title, items) {
-  return card({ title, span: true }, null, h('p', { class: 'note', style: { marginTop: 0 }, text: `${items} need event data with pitch locations (every pass, shot and tackle with where it happened). ${DB.label} has match and player stats, line-ups and formations, but no locations. Load StatsBomb-format event files in the Data tab to see these views.` }));
+  return card({ title, span: true }, null, h('p', { class: 'note', style: { marginTop: 0 }, text: `${items} need event data with pitch locations (every pass, shot and tackle with where it happened). ${DB.label} has ${dataHas()}, but no locations. Load StatsBomb-format event files in the Data tab to see these views.` }));
+}
+function missingNote(title, what, el) {
+  el.append(h('div', { class: 'hero' }, h('h1', { text: teamName(S.team) })));
+  el.append(card({ title, span: true }, null, h('p', { class: 'note', style: { marginTop: 0 }, text: `${what} are not in this data. ${DB.label} has ${dataHas()}. API-Football or StatsBomb files from the Data tab include them.` })));
 }
 
 /* ---------- Pitch ---------- */
@@ -1750,7 +1880,7 @@ function viewOverview(el) {
       h('span', { class: 'form', 'aria-label': 'Last five results' }, form.map((r) => h('span', { class: r, text: r }))),
       h('span', { class: 'sub', text: rangeLabel() + (S.venue !== 'all' ? ' · ' + S.venue : '') }))));
 
-  const KP = { xg: ['xG for', ''], xga: ['xG against', ''], poss: ['Possession', '%'], ppda: ['PPDA', ''], tilt: ['Field tilt', '%'], g: ['Goals', ''], ga: ['Goals against', ''], sh: ['Shots', ''], pass: ['Pass completion', '%'], sot: ['Shots on target', '%'], cor: ['Corners', ''] };
+  const KP = { xg: ['xG for', ''], xga: ['xG against', ''], poss: ['Possession', '%'], ppda: ['PPDA', ''], tilt: ['Field tilt', '%'], g: ['Goals', ''], ga: ['Goals against', ''], mxp: ['Market expected pts', ''], sh: ['Shots', ''], sha: ['Shots against', ''], pass: ['Pass completion', '%'], sot: ['Shots on target', '%'], cor: ['Corners', ''] };
   const kp = teamHas(Object.keys(KP), a).slice(0, 6).map((k) => [k, ...KP[k]]);
   el.append(h('div', { class: 'kpis' }, kp.map(([k, l, u]) => {
     const mt = TM[k], v = mt.f(a), rk = rankOf(mt, T);
@@ -1764,14 +1894,17 @@ function viewOverview(el) {
   el.append(grid);
   // League table
   const showXg = table.some((r) => has(r.a.xg));
+  const showMkt = table.every((r) => has(r.a.mxp));
   const lt = h('table', null,
-    h('thead', null, h('tr', null, ['#', 'Team', 'P', 'W', 'D', 'L', 'GF', 'GA', 'GD', 'Pts'].concat(showXg ? ['xG', 'xGA', 'xGD'] : []).map((c, i) => h('th', { class: i === 1 ? 'l' : '', text: c })))),
+    h('thead', null, h('tr', null, ['#', 'Team', 'P', 'W', 'D', 'L', 'GF', 'GA', 'GD', 'Pts'].concat(showXg ? ['xG', 'xGA', 'xGD'] : []).map((c, i) => h('th', { class: i === 1 ? 'l' : '', text: c })),
+      showMkt ? [h('th', { text: 'Mkt xPts', title: 'Points the betting market expected, from pre-match odds' }), h('th', { text: '+/−', title: 'Actual points minus market expected points' })] : null)),
     h('tbody', null, table.map((r) => {
       const t = r.a;
       return h('tr', { class: r.team.id === T ? 'focus' : '', onclick: () => { S.team = r.team.id; if (S.cmp === S.team) S.cmp = T; S.range = 'season'; render(); }, title: 'Show ' + r.team.name },
         h('td', { text: r.pos }), h('td', { class: 'l', text: r.team.name }), h('td', { text: t.n }), h('td', { text: t.w }), h('td', { text: t.d }), h('td', { text: t.l }),
         h('td', { text: t.g }), h('td', { text: t.ga }), h('td', { text: (t.g - t.ga > 0 ? '+' : '') + (t.g - t.ga) }), h('td', null, h('b', { text: t.pts })),
-        showXg ? [h('td', { text: fmt(t.xg, 1) }), h('td', { text: fmt(t.xga, 1) }), h('td', { text: (t.xg - t.xga > 0 ? '+' : '') + fmt(t.xg - t.xga, 1) })] : null);
+        showXg ? [h('td', { text: fmt(t.xg, 1) }), h('td', { text: fmt(t.xga, 1) }), h('td', { text: (t.xg - t.xga > 0 ? '+' : '') + fmt(t.xg - t.xga, 1) })] : null,
+        showMkt ? [h('td', { text: fmt(t.mxp, 1) }), h('td', { text: (t.pts - t.mxp > 0 ? '+' : '') + fmt(t.pts - t.mxp, 1) })] : null);
     })));
   grid.append(card('League table', 'All matches · click a row to switch team', h('div', { class: 'tbl-wrap' }, lt)));
 
@@ -1809,7 +1942,7 @@ function viewOverview(el) {
   ].filter(([, f]) => pls.some((x) => has(f(x.a)))).slice(0, 4).forEach(([l, f, t]) => {
     leaders.append(h('div', null, h('div', { class: 'eyebrow', text: l }), h('ol', { style: { margin: '6px 0 0', paddingLeft: '18px' } }, top(l, f).map((x) => h('li', null, h('a', { href: '#players', onclick: (e) => { e.preventDefault(); S.tab = 'players'; S.player = x.p.id; render(); }, style: { color: 'var(--ink)' }, text: x.p.name }), h('div', { class: 'sub', text: t(x.a) }))))));
   });
-  grid.append(card({ title: 'Squad leaders', span: false }, rangeLabel(), leaders));
+  if (pls.length) grid.append(card({ title: 'Squad leaders', span: false }, rangeLabel(), leaders));
 }
 function phaseBlock(a, compact) {
   const L = leagueAggs();
@@ -1937,6 +2070,7 @@ const PCOLS = [
 const PCOL_TIPS = { min: 'Minutes', g: 'Goals', xg: 'Expected goals', ast: 'Assists', xa: 'Expected assists', sh: 'Shots', key: 'Key passes', pct: 'Pass completion', prog: 'Progressive passes', progC: 'Progressive carries', drbW: 'Successful dribbles', tkl: 'Tackles', int: 'Interceptions', rec: 'Ball recoveries', duel: 'Duels won', touch: 'Touches', rating: 'Average match rating' };
 function colVal(c, a) { const v = c[2](a); return S.per90 && c[4] !== false && c[0] !== 'min' ? safe(v * 90, a.min) : v; }
 function viewPlayers(el) {
+  if (!DB.hasPlayers) return missingNote('Players', 'Player stats', el);
   const T = S.team, ms = scoped(T);
   let rows = Object.values(DB.players).filter((p) => p.team === T).map((p) => ({ p, a: aggPlayer(ms, p.id) })).filter((r) => r.a.min > 0);
   if (S.group !== 'all') rows = rows.filter((r) => r.p.group === S.group);
@@ -2079,7 +2213,7 @@ function viewCompare(el) {
   grid.append(card('Head to head', 'Per-match averages · bars scaled to the league maximum · bold marks the better side', butterfly(teamName(A), teamName(B), keys.map((k) => TM[k]), aA, aB, colA, colB)));
   if (!DB.hasEvents) {
     const selA = boardSelection(A, msA), selB = boardSelection(B, msB);
-    if (selA && selB) grid.append(card({ title: 'Usual line-ups', span: true }, 'Most-used formation and XI for each side', h('div', { class: 'twin' },
+    if (DB.hasLineups && selA && selB) grid.append(card({ title: 'Usual line-ups', span: true }, 'Most-used formation and XI for each side', h('div', { class: 'twin' },
       [[A, selA, colA], [B, selB, colB]].map(([T, sel, c]) => h('div', null, h('h3', null, h('span', { class: 'swatch', style: { background: c } }), teamName(T), h('span', { class: 'sub', text: sel.form + ' (' + sel.matches.length + ' of ' + scoped(T, leagueRange()).length + ')' })), tacticalBoard(sel, T, 'plan', c))))));
     grid.append(eventsNote('Pitch maps', 'Game states, passing networks, touch maps and shot maps'));
     return;
@@ -2181,12 +2315,20 @@ function matchReport(m, T) {
   const statKeys = (aT, aO) => teamHas(['xg', 'sh', 'sot', 'shIn', 'xgsh', 'poss', 'pass', 'prog', 'f3e', 'boxe', 'tilt', 'cor', 'ppda', 'height', 'hto', 'duel', 'fls', 'yc'], aT, aO).map((k) => TM[k]);
   if (!m.events.length) {
     const aT = m.ts[T], aO = m.ts[O];
-    grid.append(h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '8px' }, text: 'Match stats' }), butterfly(teamName(T), teamName(O), statKeys(aT, aO), aT, aO, colA, colB)));
-    grid.append(h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '8px' }, text: 'Timeline' }), matchTimeline(m, T, colA, colB)));
-    const one = (id) => { const sel = boardSelection(id, [m]); return sel ? tacticalBoard(sel, id, 'plan', id === T ? colA : colB) : h('p', { class: 'empty', text: 'No line-up' }); };
-    grid.append(h('div', { style: { gridColumn: '1 / -1' } }, h('div', { class: 'eyebrow', style: { marginBottom: '8px' }, text: 'Starting line-ups · both attacking right' }), h('div', { class: 'twin' },
-      h('div', null, h('h3', null, h('span', { class: 'swatch', style: { background: colA } }), teamName(T), h('span', { class: 'sub', text: m.forms[T] || '' })), one(T)),
-      h('div', null, h('h3', null, h('span', { class: 'swatch', style: { background: colB } }), teamName(O), h('span', { class: 'sub', text: m.forms[O] || '' })), one(O)))));
+    const keys = statKeys(aT, aO);
+    grid.append(h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '8px' }, text: 'Match stats' }),
+      keys.length ? butterfly(teamName(T), teamName(O), keys, aT, aO, colA, colB) : h('p', { class: 'empty', text: m.detail === false ? 'Details for this match have not been downloaded yet.' : 'No match stats in this data.' })));
+    const side = h('div', { class: 'stack' });
+    if (m.odds) side.append(oddsBlock(m, T, colA, colB));
+    if (m.timeline && m.timeline.length) side.append(h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '8px' }, text: 'Timeline' }), matchTimeline(m, T, colA, colB)));
+    if (side.children.length) grid.append(side);
+    const lined = (id) => m.lineups[id] && m.lineups[id].length;
+    if (lined(T) || lined(O)) {
+      const one = (id) => { const sel = lined(id) && boardSelection(id, [m]); return sel ? tacticalBoard(sel, id, 'plan', id === T ? colA : colB) : h('p', { class: 'empty', text: 'No line-up' }); };
+      grid.append(h('div', { style: { gridColumn: '1 / -1' } }, h('div', { class: 'eyebrow', style: { marginBottom: '8px' }, text: 'Starting line-ups · both attacking right' }), h('div', { class: 'twin' },
+        h('div', null, h('h3', null, h('span', { class: 'swatch', style: { background: colA } }), teamName(T), h('span', { class: 'sub', text: m.forms[T] || '' })), one(T)),
+        h('div', null, h('h3', null, h('span', { class: 'swatch', style: { background: colB } }), teamName(O), h('span', { class: 'sub', text: m.forms[O] || '' })), one(O)))));
+    }
     return wrap;
   }
   // momentum
@@ -2205,6 +2347,21 @@ function matchReport(m, T) {
     h('div', null, h('h3', null, h('span', { class: 'swatch', style: { background: colA } }), teamName(T), h('span', { class: 'sub', text: m.forms[T] || '' })), pnT.el),
     h('div', null, h('h3', null, h('span', { class: 'swatch', style: { background: colB } }), teamName(O), h('span', { class: 'sub', text: m.forms[O] || '' })), pnO.el))));
   return wrap;
+}
+function oddsBlock(m, T, colA, colB) {
+  // Pre-match win/draw/loss chances implied by bookmaker odds, shown from the selected team's side.
+  const mine = m.home === T ? m.odds.h : m.odds.a, theirs = m.home === T ? m.odds.a : m.odds.h, O = oppOf(m, T);
+  const r = result(m, T);
+  const seg = (p, bg, label, cls) => {
+    const el = h('div', { class: cls || '', style: { width: 100 * p + '%', background: bg }, tabindex: 0, text: p >= 0.12 ? Math.round(100 * p) + '%' : '' });
+    hover(el, () => [{ v: (100 * p).toFixed(0) + '%', strong: true }, { v: label }]);
+    return el;
+  };
+  const verdict = r === 'W' ? (mine >= theirs ? 'Won as favourites' : 'Won as underdogs') : r === 'L' ? (mine >= theirs ? 'Lost as favourites' : 'Lost as underdogs') : 'Drew';
+  return h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '8px' }, text: 'Pre-match odds · ' + verdict }),
+    h('div', { class: 'stackbar' }, seg(mine, colA, teamName(T) + ' win'), seg(m.odds.d, css('--muted'), 'Draw'), seg(theirs, colB, teamName(O) + ' win')),
+    legend([[teamName(T) + ' win', colA], ['Draw', css('--muted')], [teamName(O) + ' win', colB]]),
+    h('p', { class: 'note', text: 'Implied by the average bookmaker odds before kick-off, with the bookmaker margin removed.' }));
 }
 function matchTimeline(m, T, colA, colB) {
   const items = (m.timeline || []).slice().sort((a, b) => a.min - b.min);
@@ -2253,11 +2410,16 @@ function xgRace(box, m, T, O, colA, colB) {
 }
 
 /* ---------- Data ---------- */
+// football-data.co.uk season folder, e.g. 2627 for 2026/27 (seasons roll over in July).
+function seasonCode(d = new Date()) {
+  const y = d.getUTCMonth() >= 6 ? d.getUTCFullYear() : d.getUTCFullYear() - 1;
+  return String(y % 100).padStart(2, '0') + String((y + 1) % 100).padStart(2, '0');
+}
 function viewData(el) {
   const status = h('div', { class: 'status', role: 'status' });
-  const input = h('input', { type: 'file', id: 'file', accept: '.json,application/json', multiple: true, hidden: true, onchange: (e) => load(e.target.files) });
+  const input = h('input', { type: 'file', id: 'file', accept: '.json,.csv,application/json,text/csv', multiple: true, hidden: true, onchange: (e) => load(e.target.files) });
   const drop = h('div', { class: 'drop' },
-    h('p', { style: { margin: '0 0 10px' } }, 'Drop the API-Football file from the download script here, or StatsBomb event files (one ', h('code', { text: '<match_id>.json' }), ' per match, plus the competition’s ', h('code', { text: 'matches.json' }), ').'),
+    h('p', { style: { margin: '0 0 10px' } }, 'Drop a football-data.co.uk CSV, the API-Football file from the download script, or StatsBomb event files (one ', h('code', { text: '<match_id>.json' }), ' per match, plus the competition’s ', h('code', { text: 'matches.json' }), ').'),
     h('button', { class: 'btn', type: 'button', onclick: () => input.click(), text: 'Choose files' }), input);
   ['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add('over'); }));
   ['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
@@ -2268,14 +2430,23 @@ function viewData(el) {
     status.className = 'status';
     status.textContent = 'Reading ' + files.length + ' file' + (files.length > 1 ? 's' : '') + '…';
     try {
-      const parsed = await Promise.all(files.map(async (f) => ({ name: f.name, data: JSON.parse(await f.text()) })));
-      const af = isApiFootball(parsed);
-      const { db, errors } = af ? importApiFootball(parsed) : importStatsBomb(parsed);
+      const texts = await Promise.all(files.map(async (f) => ({ name: f.name, text: await f.text() })));
+      // CSV files (football-data.co.uk) and JSON files (API-Football, StatsBomb) are told apart by content.
+      const csv = [], parsed = [];
+      texts.forEach((f) => {
+        const t = f.text.replace(/^﻿/, '').trimStart();
+        if (t[0] === '[' || t[0] === '{') parsed.push({ name: f.name, data: JSON.parse(t) });
+        else { const rows = fdParseCSV(t); if (fdIsCSV(rows)) csv.push({ name: f.name, rows }); }
+      });
+      if (!csv.length && !parsed.length) { status.className = 'status err'; status.textContent = 'These files are not in a format Touchline Lab reads. Use a football-data.co.uk CSV, the API-Football download, or StatsBomb event files.'; return; }
+      const kind = csv.length ? 'fd' : isApiFootball(parsed) ? 'af' : 'sb';
+      const { db, errors } = kind === 'fd' ? importFootballData(csv) : kind === 'af' ? importApiFootball(parsed) : importStatsBomb(parsed);
       if (!db.matches.length) {
         status.className = 'status err';
-        status.textContent = af ? (errors[0] || 'No finished matches found.') : 'No matches found. Use the API-Football file from the download script, or StatsBomb event files (each must include the two "Starting XI" events).';
+        status.textContent = kind !== 'sb' ? (errors[0] || 'No finished matches found.') : 'No matches found. Use a football-data.co.uk CSV, the API-Football file from the download script, or StatsBomb event files (each must include the two "Starting XI" events).';
         return;
       }
+      if (errors.length && kind === 'fd') setTimeout(() => { const n = document.querySelector('#main'); if (n) n.prepend(h('p', { class: 'note', role: 'status', text: errors[0] })); }, 0);
       DB = prepareDB(db);
       cache.clear();
       const counts = {};
@@ -2289,7 +2460,7 @@ function viewData(el) {
       render();
     } catch (err) {
       status.className = 'status err';
-      status.textContent = 'Could not read the files: ' + err.message + '. Check they are API-Football or StatsBomb JSON files.';
+      status.textContent = 'Could not read the files: ' + err.message + '. Check they are a football-data.co.uk CSV, or API-Football or StatsBomb JSON files.';
     }
   }
   const prose = h('div', { class: 'prose' },
@@ -2302,10 +2473,18 @@ function viewData(el) {
     h('ul', null,
       h('li', null, h('b', { text: 'Event data for the Scottish Premiership' }), ' (needed for heatmaps and passing networks) comes from commercial providers such as Hudl StatsBomb, Opta (Stats Perform) and Wyscout. Clubs and media usually license it. If you can get StatsBomb-format exports, drop them in below.'),
       h('li', null, h('b', { text: 'Free practice data: ' }), h('a', { href: 'https://github.com/statsbomb/open-data', target: '_blank', rel: 'noopener', text: 'StatsBomb Open Data' }), ' on GitHub has full event data for selected competitions (World Cups, Euros, some league seasons). The Scottish Premiership is not included, but it is the quickest way to load real matches here and test team comparisons.'),
-      h('li', null, h('b', { text: 'Match and player stats, line-ups and formations' }), ' for Aberdeen and the rest of the Scottish Premiership: use the API-Football download below. Without event locations, the pitch maps stay empty.')));
+      h('li', null, h('b', { text: 'This season, free: ' }), 'football-data.co.uk has results, shots, corners, fouls, cards and bookmaker odds for every Scottish Premiership match, updated during the season. See the steps below.'),
+      h('li', null, h('b', { text: 'Player stats, line-ups and formations' }), ': use the API-Football download below (free plan: past seasons only). Without event locations, the pitch maps stay empty.')));
+  const fdUrl = 'https://www.football-data.co.uk/mmz4281/' + seasonCode() + '/SC0.csv';
   el.append(h('div', { class: 'grid' },
     card('Data source', DB.label, prose),
-    card('Import data', 'API-Football or StatsBomb files · they stay in your browser, nothing is uploaded', drop, status,
+    card('This season from football-data.co.uk', 'Free, no account or key · results, team stats and odds', h('div', { class: 'prose' },
+      h('ol', null,
+        h('li', null, 'Download this season’s Scottish Premiership file: ', h('a', { href: fdUrl, target: '_blank', rel: 'noopener', text: fdUrl.replace('https://www.', '') }), '. If the link does not work, go to ', h('a', { href: 'https://www.football-data.co.uk/scotlandm.php', target: '_blank', rel: 'noopener', text: 'football-data.co.uk/scotlandm.php' }), ' and click Premiership for the season you want.'),
+        h('li', null, 'Drop the downloaded ', h('code', { text: 'SC0.csv' }), ' into the import box.')),
+      h('p', null, 'You get the league table, form, results, shots, shots on target, corners, fouls and cards per match, plus pre-match odds. The app turns the odds into expected points, so you can see which teams are doing better or worse than the market expected.'),
+      h('p', null, 'There are no player stats, line-ups or xG in this file. The site keeps it updated through the season, so download it again for the latest results.'))),
+    card('Import data', 'football-data.co.uk, API-Football or StatsBomb files · they stay in your browser, nothing is uploaded', drop, status,
       DB.source !== 'demo' ? h('div', { style: { marginTop: '12px' } }, h('button', { class: 'btn ghost', type: 'button', onclick: () => { DB = DEMO; cache.clear(); S.team = 'ABE'; S.cmp = 'CEL'; S.range = 'season'; S.player = null; S.match = null; S.pA = S.pB = null; render(); }, text: 'Back to demo season' })) : null,
       h('p', { class: 'note', text: 'StatsBomb tip: in the open-data repository, events live in data/events/ and fixtures in data/matches/<competition_id>/<season_id>.json. Load several matches from one competition to unlock league tables and rankings.' })),
     card('Real Aberdeen data from API-Football', 'Free plan: seasons 2022/23 to 2024/25, about 95 matches a day', h('div', { class: 'prose' },
@@ -2538,7 +2717,8 @@ function lineupList(sel, T, single) {
 }
 
 function viewTactics(el) {
-  const T = S.team, ms = scoped(T), A = css('--team-a');
+  if (!DB.hasLineups) return missingNote('Tactics', 'Line-ups and formations', el);
+  const T = S.team, ms = scoped(T).filter((m) => (m.lineups[S.team] || []).length), A = css('--team-a');
   const single = S.range.startsWith('m:') && ms.length === 1;
   const sel = boardSelection(T, ms);
   el.append(h('div', { class: 'hero' }, h('h1', { text: teamName(T) }), h('div', { class: 'meta' }, h('span', { text: rangeLabel() + ' · ' + ms.length + (ms.length === 1 ? ' match' : ' matches') }))));

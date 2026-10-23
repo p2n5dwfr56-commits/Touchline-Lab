@@ -201,7 +201,8 @@ function lineupList(sel, T, single) {
 }
 
 function viewTactics(el) {
-  const T = S.team, ms = scoped(T), A = css('--team-a');
+  if (!DB.hasLineups) return missingNote('Tactics', 'Line-ups and formations', el);
+  const T = S.team, ms = scoped(T).filter((m) => (m.lineups[S.team] || []).length), A = css('--team-a');
   const single = S.range.startsWith('m:') && ms.length === 1;
   const sel = boardSelection(T, ms);
   el.append(h('div', { class: 'hero' }, h('h1', { text: teamName(T) }), h('div', { class: 'meta' }, h('span', { text: rangeLabel() + ' · ' + ms.length + (ms.length === 1 ? ' match' : ' matches') }))));

@@ -12,11 +12,19 @@ After editing anything in `src/`, run `./build.sh` to rebuild `dist/index.html`.
 - `src/ui.js` – views and charts (plain JS + SVG, no libraries)
 - `src/tactics.js` – Tactics tab: formations, tactical line-up board, shape numbers
 - `src/apifootball.js` – API-Football importer (match/player stats, line-ups, formations)
+- `src/footballdata.js` – football-data.co.uk CSV importer (results, team match stats, odds)
 - `tools/fetch-api-football.mjs` – downloads a season from API-Football into one file
 - `src/style.css`, `src/head.html` – styling and page head
 
 ## Data
-The built-in season is synthetic. Two kinds of real data can be loaded from the Data tab:
+The built-in season is synthetic. Three kinds of real data can be loaded from the Data tab:
+
+**football-data.co.uk CSV** (free, no key, current season). Results, shots, shots on target,
+corners, fouls, cards and bookmaker odds for every match, one file per league season. The
+Scottish Premiership file for 2026/27 is https://www.football-data.co.uk/mmz4281/2627/SC0.csv
+(the folder is the two season years, e.g. 2526 for 2025/26). Download it in a browser and drop it
+in. The odds become "market expected points", shown next to actual points in the league table.
+No players, line-ups, xG or pitch locations, so Players, Tactics and the pitch maps stay empty.
 
 **StatsBomb event data** (every pass, shot and tackle with pitch coordinates, 120 x 80 yards,
 each team attacking left to right). Drives every view, including heatmaps and passing networks.

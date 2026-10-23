@@ -20,7 +20,7 @@ const AF_ROW_ROLES = {
   FWD: { 1: ['ST'], 2: ['RS', 'LS'], 3: ['RW', 'ST', 'LW'] },
 };
 const AF_POS_GROUP = { G: 'GK', D: 'DEF', M: 'MID', F: 'FWD' };
-const AF_NO_TEAM = ['npxg', 'npxga', 'ppdaPass', 'ppdaDef', 'f3p', 'of3p', 'prog', 'f3e', 'boxe', 'cross', 'spxg', 'hto', 'defX', 'defN', 'fwd', 'dist', 'poss', 'possMid', 'possF3', 'possBox', 'possShot', 'possGoal', 'rec', 'trSh', 'trXg'];
+const AF_NO_TEAM = ['npxg', 'npxga', 'ppdaPass', 'ppdaDef', 'f3p', 'of3p', 'prog', 'f3e', 'boxe', 'cross', 'spxg', 'hto', 'defX', 'defN', 'fwd', 'dist', 'poss', 'possMid', 'possF3', 'possBox', 'possShot', 'possGoal', 'rec', 'trSh', 'trXg', 'mxp'];
 const AF_NO_PLAYER = ['xg', 'npxg', 'xa', 'prog', 'progC', 'f3e', 'boxT', 'rec', 'clr', 'touch', 'cross', 'ca'];
 
 function afNum(v) {

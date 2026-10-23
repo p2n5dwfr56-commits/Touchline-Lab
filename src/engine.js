@@ -553,7 +553,7 @@ function progressive(x, y, ex, ey) {
 }
 
 function blankTeam() {
-  const o = { n: 0, w: 0, d: 0, l: 0, pts: 0, g: 0, ga: 0, xg: 0, xga: 0, npxg: 0, npxga: 0, sh: 0, sha: 0, sot: 0, pa: 0, pc: 0, posT: 0, oposT: 0, ppdaPass: 0, ppdaDef: 0, f3p: 0, of3p: 0, prog: 0, f3e: 0, boxe: 0, cross: 0, spxg: 0, hto: 0, defX: 0, defN: 0, fwd: 0, dist: 0, poss: 0, possMid: 0, possF3: 0, possBox: 0, possShot: 0, possGoal: 0, duel: 0, duelW: 0, tkl: 0, int: 0, rec: 0, drb: 0, drbW: 0, trSh: 0, trXg: 0, cor: 0, fls: 0, yc: 0, shIn: 0, ph: {}, oph: {} };
+  const o = { n: 0, w: 0, d: 0, l: 0, pts: 0, g: 0, ga: 0, xg: 0, xga: 0, npxg: 0, npxga: 0, sh: 0, sha: 0, sot: 0, pa: 0, pc: 0, posT: 0, oposT: 0, ppdaPass: 0, ppdaDef: 0, f3p: 0, of3p: 0, prog: 0, f3e: 0, boxe: 0, cross: 0, spxg: 0, hto: 0, defX: 0, defN: 0, fwd: 0, dist: 0, poss: 0, possMid: 0, possF3: 0, possBox: 0, possShot: 0, possGoal: 0, duel: 0, duelW: 0, tkl: 0, int: 0, rec: 0, drb: 0, drbW: 0, trSh: 0, trXg: 0, cor: 0, fls: 0, yc: 0, shIn: 0, mxp: 0, ph: {}, oph: {} };
   PHASES.forEach((k) => { o.ph[k] = 0; o.oph[k] = 0; });
   return o;
 }
@@ -656,7 +656,8 @@ function prepareMatch(m) {
       if (p.shot) s.possShot++;
       if (p.goal) s.possGoal++;
     });
-    s.yc = NaN; // cards are not in the event model
+    s.yc = NaN; // cards and betting odds are not in the event model
+    s.mxp = NaN;
     m.ts[T] = s;
   });
   // players
@@ -722,6 +723,7 @@ const has = (v) => v != null && Number.isFinite(v);
 /* Team metric catalogue. dir: 1 higher is better, -1 lower is better, 0 neutral (style) */
 const TEAM_METRICS = [
   { k: 'ppg', l: 'Points per game', f: (a) => safe(a.pts, a.n), d: 2, dir: 1, grp: 'Results' },
+  { k: 'mxp', l: 'Market expected points', u: '/match', f: (a) => safe(a.mxp, a.n), d: 2, dir: 1, grp: 'Results', tip: 'Points the betting market expected before each match, from bookmaker odds (3 × win chance + draw chance). Compare with points per game to see who is over- or under-performing expectations.' },
   { k: 'g', l: 'Goals', u: '/match', f: (a) => safe(a.g, a.n), d: 2, dir: 1, grp: 'Attack' },
   { k: 'xg', l: 'xG', u: '/match', f: (a) => safe(a.xg, a.n), d: 2, dir: 1, grp: 'Attack' },
   { k: 'npxg', l: 'Non-penalty xG', u: '/match', f: (a) => safe(a.npxg, a.n), d: 2, dir: 1, grp: 'Attack' },
@@ -782,6 +784,8 @@ function playerValue(mt, a, per90) { const v = mt.f(a); return per90 && mt.p90 ?
 function prepareDB(db) {
   db.matches.forEach((m) => { if (!m.ts) prepareMatch(m); }); // stats-only sources arrive with ts/ps already built
   db.hasEvents = db.matches.some((m) => m.events && m.events.length);
+  db.hasLineups = db.matches.some((m) => Object.values(m.lineups || {}).some((l) => l.length));
+  db.hasPlayers = Object.keys(db.players || {}).length > 0;
   db.teamById = {};
   db.teams.forEach((t) => (db.teamById[t.id] = t));
   db.teams.sort((a, b) => a.name.localeCompare(b.name));
