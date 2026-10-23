@@ -12,6 +12,7 @@
     --league <id>   League id (default 501, Scottish Premiership).
     --season <id>   Season id (default: the league's current season).
     --out <file>    Output file (default: sportmonks-<league>-<season>.json).
+    --list-seasons  List the league's seasons and their ids (free plan: past seasons included).
 
   Saves line-ups (with formation positions), formations, events (goals, assists, cards,
   substitutions), team statistics and per-player match statistics for every finished
@@ -44,6 +45,11 @@ const day = (d) => d.toISOString().slice(0, 10);
 
 async function main() {
   const league = Number(opt('league', 501));
+  if (args.includes('--list-seasons')) {
+    const r = await api(`/seasons?filters=seasonLeagues:${league}&per_page=50`);
+    r.data.sort((a, b) => b.name.localeCompare(a.name)).forEach((x) => console.log(`  --season ${x.id}`.padEnd(18), x.name + (x.is_current ? '  (current)' : '')));
+    return;
+  }
   let season = opt('season');
   const lg = (await api(`/leagues/${league}?include=currentSeason`)).data;
   if (!season) season = lg.currentseason && lg.currentseason.id;

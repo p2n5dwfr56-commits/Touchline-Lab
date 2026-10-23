@@ -838,10 +838,25 @@ function prepareDB(db) {
   return db;
 }
 function leagueTable(db, matches) {
-  const rows = db.teams.map((t) => ({ team: t, a: aggTeam(matches || db.results || db.matches, t.id) })).filter((r) => r.a.n); // results include fixtures without match detail
-  rows.sort((x, y) => y.a.pts - x.a.pts || (y.a.g - y.a.ga) - (x.a.g - x.a.ga) || y.a.g - x.a.g || x.team.name.localeCompare(y.team.name));
+  const ms = matches || db.results || db.matches;
+  const rows = db.teams.map((t) => ({ team: t, a: aggTeam(ms, t.id) })).filter((r) => r.a.n); // results include fixtures without match detail
+  const byPts = (x, y) => y.a.pts - x.a.pts || (y.a.g - y.a.ga) - (x.a.g - x.a.ga) || y.a.g - x.a.g || x.team.name.localeCompare(y.team.name);
+  rows.sort(byPts);
+  // Scottish split: a 12-team league plays 33 rounds, then splits into top and bottom six for five more.
+  // Once the split has happened, a bottom-six team can't finish above 7th, whatever its points.
+  const top6 = !matches ? splitTop6(db, ms, rows) : null;
+  if (top6) rows.sort((x, y) => (top6.has(y.team.id) - top6.has(x.team.id)) || byPts(x, y));
   rows.forEach((r, i) => (r.pos = i + 1));
   return rows;
+}
+function splitTop6(db, ms, rows) {
+  if (rows.length !== 12 || !rows.every((r) => r.a.n >= 34)) return null;
+  const sorted = ms.slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const cnt = {}, early = [];
+  sorted.forEach((m) => { if ((cnt[m.home] || 0) < 33 && (cnt[m.away] || 0) < 33) early.push(m); cnt[m.home] = (cnt[m.home] || 0) + 1; cnt[m.away] = (cnt[m.away] || 0) + 1; });
+  const t = db.teams.map((tm) => ({ team: tm, a: aggTeam(early, tm.id) })).filter((r) => r.a.n);
+  t.sort((x, y) => y.a.pts - x.a.pts || (y.a.g - y.a.ga) - (x.a.g - x.a.ga) || y.a.g - x.a.g);
+  return new Set(t.slice(0, 6).map((r) => r.team.id));
 }
 
 /* ---------- Spatial helpers ---------- */

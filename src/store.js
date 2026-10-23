@@ -172,3 +172,17 @@ async function restoreSaved() {
     return { error: 'Your saved data could not be loaded again (' + e.message + '), so the demo season is showing.' };
   }
 }
+
+/* Past seasons added in this browser: season ("2024/25") -> { primary: [season file], layers: [Sportmonks files] },
+   kept apart from the current season's log so adding an old season never replaces it. */
+async function pastGet() { return (await storeGet('past')) || {}; }
+async function pastPut(season, change) {
+  const all = await pastGet();
+  const cur = all[season] || { primary: [], layers: [] };
+  all[season] = change(cur) || cur;
+  all[season].savedAt = Date.now();
+  return storeSet('past', all);
+}
+const pastAddPrimary = (season, texts) => pastPut(season, (c) => ({ ...c, primary: texts.map((t) => ({ name: t.name, text: t.text })) }));
+const pastAddLayer = (season, f) => pastPut(season, (c) => ({ ...c, layers: (c.layers || []).filter((l) => l.name !== f.name).concat({ name: f.name, text: f.text }) }));
+async function pastRemove(season) { const all = await pastGet(); delete all[season]; return storeSet('past', all); }

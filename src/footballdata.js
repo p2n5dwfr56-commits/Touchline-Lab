@@ -110,7 +110,7 @@ function importFootballData(csvFiles) {
     });
   });
   const label = `${FD_DIVISIONS[S0.div] || S0.div || 'League'} ${S0.season} (football-data.co.uk)`;
-  return { db: { source: 'football-data', label, teams: Object.values(teams), players: {}, matches }, errors };
+  return { db: { source: 'football-data', label, season: S0.season, div: S0.div, teams: Object.values(teams), players: {}, matches }, errors };
 }
 
 if (typeof module !== 'undefined') module.exports = { importFootballData, fdParseCSV, fdIsCSV };

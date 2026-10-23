@@ -26,6 +26,7 @@ belongs to that browser on that device.
 - `src/sportmonks.js` – Sportmonks importer (line-ups, events, player match stats), added on top of a season
 - `src/pressing.js` – Without the ball tab: ball winning, losses of the ball, time to win it back, 360 positions
 - `src/assessment.js` – Key players tab: position-based player ratings, squad leaders, season improvement
+- `src/seasons.js` – past seasons: season picker, Seasons tab (season by season, points race, players across seasons)
 - `src/opponents.js` – Opponents tab: record against each club, this season and all-time
 - `src/store.js` – saves imports in the browser and restores them on open; built-in snapshot
 - `tools/embed-snapshot.mjs` – used by `build.sh --with-snapshot`
@@ -137,3 +138,16 @@ by position into a performance score, and importance = performance × (0.4 + 0.6
 Players with few minutes are pulled towards average. The tab also lists squad leaders, results with and
 without each starter, and **season improvement**: each player's early matches against his recent ones
 for match rating or a chosen stat, with a match-by-match trend and 3-match rolling average.
+
+## Seasons
+Earlier seasons sit beside the current one. Drop a past season's football-data.co.uk file
+(e.g. https://www.football-data.co.uk/mmz4281/2425/SC0.csv) into the Data tab and it is saved as a
+past season, leaving the current season as it is. Add line-ups and player stats for it with
+Sportmonks (`node tools/fetch-sportmonks.mjs --list-seasons`, then `--season <id>`). The free plan has
+full player stats from 2019/20; 2017/18 and 2018/19 have minutes, goals, assists and cards only.
+Pick a season with **Season** at the top to see it in every tab. The **Seasons** tab compares them:
+position (with the split after 33 rounds), points, market expected points, goals and shots by season,
+a points race of this season against earlier ones, and players' numbers season by season.
+
+Snapshot builds embed past seasons from `data/snapshot/past/` via the manifest's `past` list
+(`{season, files, layers}`); unused CSV columns and Sportmonks stat types are dropped to keep the page small.

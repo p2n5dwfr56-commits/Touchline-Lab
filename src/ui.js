@@ -8,9 +8,9 @@ const S = {
   tab: 'overview', team: 'ABE', venue: 'all', range: 'season', cmp: 'CEL',
   heat: 'all', shots: 'for', group: 'all', per90: true, sort: 'min', player: null,
   cmpMode: 'teams', pA: null, pB: null, match: null, act: 'pass', form: null, shape: 'plan',
-  opp: null, oppSort: 'next', oppScope: 'league', comp: 'all', loss: null, lossShow: 'shot', bwSort: 'wins', impMetric: 'rating', impPlayer: null,
+  opp: null, oppSort: 'next', oppScope: 'league', comp: 'all', loss: null, lossShow: 'shot', bwSort: 'wins', impMetric: 'rating', impPlayer: null, raceN: '5',
 };
-const TABS = [['overview', 'Overview'], ['team', 'Team analysis'], ['press', 'Without the ball'], ['tactics', 'Tactics'], ['players', 'Players'], ['key', 'Key players'], ['compare', 'Compare'], ['opponents', 'Opponents'], ['matches', 'Matches'], ['data', 'Data']];
+const TABS = [['overview', 'Overview'], ['team', 'Team analysis'], ['press', 'Without the ball'], ['tactics', 'Tactics'], ['players', 'Players'], ['key', 'Key players'], ['compare', 'Compare'], ['opponents', 'Opponents'], ['seasons', 'Seasons'], ['matches', 'Matches'], ['data', 'Data']];
 
 /* ---------- DOM helpers ---------- */
 function h(tag, a, ...kids) {
@@ -352,9 +352,12 @@ function lineChart(box, { series, labels, tipFor, yFmt = (v) => v.toFixed(1), he
   labels.forEach((l, i) => { if (i % every === 0 || i === n - 1) ax.append(sv('text', { x: X(i), y: H - 6, 'text-anchor': 'middle', text: l })); });
   svg.append(ax);
   series.forEach((s) => {
-    const d = s.values.map((v, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1)).join('');
-    svg.append(sv('path', { d, fill: 'none', stroke: s.color, 'stroke-width': 2, 'stroke-dasharray': s.dash || null, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
-    s.values.forEach((v, i) => svg.append(sv('circle', { cx: X(i), cy: Y(v), r: i === n - 1 ? 4 : 2.6, fill: s.color, stroke: css('--surface'), 'stroke-width': 1.5 })));
+    let pen = false; // a missing value (NaN) breaks the line
+    const d = s.values.map((v, i) => { if (!has(v)) { pen = false; return ''; } const c = (pen ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1); pen = true; return c; }).join('');
+    svg.append(sv('path', { d, fill: 'none', stroke: s.color, 'stroke-width': s.width || 2, 'stroke-dasharray': s.dash || null, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+    const lastI = s.values.reduce((li, v, i) => (has(v) ? i : li), -1);
+    if (!s.noDots) s.values.forEach((v, i) => has(v) && svg.append(sv('circle', { cx: X(i), cy: Y(v), r: i === lastI ? 4 : 2.6, fill: s.color, stroke: css('--surface'), 'stroke-width': 1.5 })));
+    else if (lastI >= 0) svg.append(sv('circle', { cx: X(lastI), cy: Y(s.values[lastI]), r: 3.2, fill: s.color, stroke: css('--surface'), 'stroke-width': 1.2 }));
     if (s.points) s.points.forEach((v, i) => has(v) && svg.append(sv('circle', { cx: X(i), cy: Y(v), r: 3.4, fill: s.color, 'fill-opacity': 0.28, stroke: 'none' }))); // single values behind an average line
   });
   const cross = sv('line', { y1: m.t, y2: H - m.b, stroke: css('--muted'), 'stroke-width': 1, opacity: 0 });
@@ -439,6 +442,7 @@ function renderChrome() {
     h('select', { id: 'f-comp', title: 'Applies to results, form, matches, formations and opponents. Team stats and the league table are league only.', onchange: (e) => { S.comp = e.target.value; render(); } },
       [['all', 'All competitions'], ['league', 'League only'], ['cups', 'Cups only']].map(([v, l]) => h('option', { value: v, selected: S.comp === v, text: l })))) : null;
   filtersEl.replaceChildren(...[
+    seasonSelect(),
     h('div', { class: 'field' }, h('label', { for: 'f-team', text: 'Team' }), teamSel),
     compSel,
     h('div', { class: 'field' }, h('label', { for: 'f-venue', text: 'Venue' }), venueSel),
@@ -446,11 +450,12 @@ function renderChrome() {
   tabsEl.replaceChildren(...TABS.map(([k, l]) => h('button', { role: 'tab', 'aria-selected': String(S.tab === k), onclick: () => { S.tab = k; try { history.replaceState(null, '', '#' + k); } catch (e) {} render(); window.scrollTo({ top: 0 }); }, text: l })));
 }
 function render() {
+  noteReal();
   aggPlayer.season = DB.seasonPS || null; // FBref season totals, when loaded
   hideTip();
   renderChrome();
   mainEl.replaceChildren();
-  const views = { overview: viewOverview, team: viewTeam, press: viewPress, tactics: viewTactics, players: viewPlayers, key: viewKey, compare: viewCompare, opponents: viewOpponents, matches: viewMatches, data: viewData };
+  const views = { overview: viewOverview, team: viewTeam, press: viewPress, tactics: viewTactics, players: viewPlayers, key: viewKey, compare: viewCompare, opponents: viewOpponents, seasons: viewSeasons, matches: viewMatches, data: viewData };
   (views[S.tab] || viewOverview)(mainEl);
 }
 
@@ -1100,6 +1105,20 @@ function addFbref(texts, teamId, statusEl, opts = {}) {
 function addSportmonks(files, statusEl, opts = {}) {
   const say = (msg) => { if (statusEl) { statusEl.className = 'status err'; statusEl.textContent = msg; } return false; };
   if (DB.source === 'demo') return say('Load the season file first (for example this season’s football-data.co.uk file), then add the Sportmonks file to it.');
+  // A Sportmonks file for another season goes with that season
+  const other = files.filter((f) => { const k = seasonKey(f.data.season && f.data.season.name); return k && DB.season && k !== DB.season; });
+  if (other.length && !opts.restore) {
+    const f = other[0], k = seasonKey(f.data.season.name);
+    if (!SEASONS.list.some((x) => x.season === k) && !(SEASONS.real && SEASONS.real.season === k)) return say(`This Sportmonks file is for ${k}. Add that season’s football-data.co.uk file first (Data tab, Seasons), then this file.`);
+    if (SEASONS.real && SEASONS.real.season === k) { DB = SEASONS.real; cache.clear(); return addSportmonks(files, statusEl, opts); }
+    pastAddLayer(k, { name: f.name, text: f.text }).then(async (ok) => {
+      await refreshSeasons();
+      delete SEASON_DB[k];
+      if (loadSeason(k)) { S.tab = 'players'; render(); }
+      flash(`Added Sportmonks line-ups and player stats to ${k}.` + (ok ? '' : ' This browser would not save it, so it will be gone when you reload.'), ok ? 'ok' : 'err');
+    });
+    return true;
+  }
   let last = null;
   for (const f of files) {
     const r = attachSportmonks(DB, f.data);
@@ -1167,6 +1186,16 @@ function importTexts(texts, statusEl, opts = {}) {
   }
   const kind = csv.length ? 'fd' : isApiFootball(parsed) ? 'af' : 'sb';
   const { db, errors } = kind === 'fd' ? importFootballData(csv) : kind === 'af' ? importApiFootball(parsed) : importStatsBomb(parsed);
+  // An older season than the current one is kept as a past season, not instead of it
+  if (kind === 'fd' && !opts.restore && db.matches.length && SEASONS.real && db.season && db.season < SEASONS.real.season) {
+    pastAddPrimary(db.season, texts).then(async (ok) => {
+      await refreshSeasons();
+      delete SEASON_DB[db.season];
+      if (loadSeason(db.season)) { S.tab = 'seasons'; render(); }
+      flash(`Added ${db.label} as a past season. Your ${SEASONS.real.season} data is unchanged.` + (ok ? '' : ' This browser would not save it, so it will be gone when you reload.'), ok ? 'ok' : 'err');
+    });
+    return true;
+  }
   if (!db.matches.length) {
     return fail(kind !== 'sb' ? (errors[0] || 'No finished matches found.') : 'No matches found. Use a football-data.co.uk CSV, the API-Football file from the download script, or StatsBomb event files (each must include the two "Starting XI" events).');
   }
@@ -1362,6 +1391,7 @@ function viewData(el) {
         h('li', null, 'Drop the saved ', h('code', { text: 'sportmonks-501-<season>.json' }), ' into the import box, after the season file. Run it again after each round to update.')),
       h('p', null, 'Adds starting line-ups with positions, formations, goals with assists, cards, substitutions and per-player match stats (minutes, touches, passes, key passes, shots, tackles, interceptions, recoveries, duels, dribbles, saves and ratings) for every club. Player stats then follow the match filters, and percentiles compare against the whole league.'),
       h('p', null, 'The free plan covers the Premiership only, not the League Cup or Scottish Cup, and has no xG (football-data.co.uk provides team xG).'))),
+    seasonsCard(),
     addMatchCard(),
     card('This season from football-data.co.uk', 'Free, no account or key · results, team stats and odds', h('div', { class: 'prose' },
       h('ol', null,
@@ -1380,6 +1410,24 @@ function viewData(el) {
       h('p', null, 'The free plan fetches one match per request, so a full 228-match season takes about three days. Run the same command once a day: Aberdeen\u2019s matches come first, finished matches are kept, and the league table is complete from day one. Paid plans cover the current season and fetch it in one go.')))));
 }
 
+function seasonsCard() {
+  const all = allSeasons();
+  const prev = seasonCode(new Date(Date.now() - 365 * 864e5));
+  const url = 'https://www.football-data.co.uk/mmz4281/' + prev + '/SC0.csv';
+  const list = all.length > 1 ? h('div', { class: 'mlist', style: { marginTop: '10px' } }, all.map((x) => {
+    const e = x.entry, rm = e && e.saved ? h('button', { class: 'btn ghost', type: 'button', style: { padding: '3px 10px', fontSize: '12.5px' }, text: 'Remove' }) : null;
+    if (rm) { let armed = false; rm.addEventListener('click', async () => { if (!armed) { armed = true; rm.textContent = 'Click to confirm'; return; } await pastRemove(x.season); delete SEASON_DB[x.season]; await refreshSeasons(); if (DB.pastSeason && DB.season === x.season) await loadRealData(); render(); flash('Removed your saved files for ' + x.season + '.'); }); }
+    const what = x.current ? 'current season' : (e.src === 'built-in' ? 'built in' : 'saved in this browser') + ' · results and team stats' + (e.layers.length ? ' + line-ups and player stats' : '');
+    return h('div', { class: 'mrow', style: { cursor: 'default', gridTemplateColumns: 'auto 1fr auto auto' } }, h('b', { text: x.season }), h('span', { class: 'sub', text: what }),
+      h('button', { class: 'btn ghost', type: 'button', style: { padding: '3px 10px', fontSize: '12.5px' }, text: DB.season === x.season ? 'Showing' : 'Open', disabled: DB.season === x.season, onclick: () => { if (loadSeason(x.season)) { S.tab = 'overview'; render(); } } }), rm || h('span'));
+  })) : null;
+  return card('Seasons', 'Earlier seasons to compare with this one · pick one with Season at the top of the page', h('div', { class: 'prose' },
+    h('ol', null,
+      h('li', null, 'Download a past season’s file from football-data.co.uk, e.g. ', h('a', { href: url, target: '_blank', rel: 'noopener', text: url.replace('https://www.', '') }), ' (the folder is the two season years: 2425 = 2024/25), and drop it into the import box. It is added as a past season; this season’s data stays as it is.'),
+      h('li', null, 'For line-ups and player stats in that season, run ', h('code', { text: 'node tools/fetch-sportmonks.mjs --list-seasons' }), ' for the season ids, then ', h('code', { text: 'SPORTMONKS_TOKEN=… node tools/fetch-sportmonks.mjs --season <id>' }), ', and drop the saved file in.')),
+    h('p', null, 'The Seasons tab then compares them: positions, points, goals and shots by season, a points race against earlier seasons, and players’ numbers season by season.')), list);
+}
+
 /* ---------- Boot ---------- */
 function boot() {
   buildShell();
@@ -1393,6 +1441,7 @@ function boot() {
     loading.textContent = 'Loading your saved data…';
     const restored = await restoreSaved();
     if (!(restored && restored.ok)) loadSnapshot(); // no saved imports: open on the built-in real data, if this build has it
+    await refreshSeasons();
     render();
     if (restored && restored.error) flash(restored.error, 'err');
     else if (restored && STORE.meta) flash(`Restored your saved data: ${STORE.meta.label || STORE.meta.files.join(', ')}${STORE.meta.fbTables ? ` + ${STORE.meta.fbTables} FBref table${STORE.meta.fbTables > 1 ? 's' : ''}` : ''}. Manage it in the Data tab.`);
