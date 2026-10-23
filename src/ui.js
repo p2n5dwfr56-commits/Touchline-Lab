@@ -8,9 +8,9 @@ const S = {
   tab: 'overview', team: 'ABE', venue: 'all', range: 'season', cmp: 'CEL',
   heat: 'all', shots: 'for', group: 'all', per90: true, sort: 'min', player: null,
   cmpMode: 'teams', pA: null, pB: null, match: null, act: 'pass', form: null, shape: 'plan',
-  opp: null, oppSort: 'next', oppScope: 'league', comp: 'all', loss: null, lossShow: 'shot', bwSort: 'wins',
+  opp: null, oppSort: 'next', oppScope: 'league', comp: 'all', loss: null, lossShow: 'shot', bwSort: 'wins', impMetric: 'rating', impPlayer: null,
 };
-const TABS = [['overview', 'Overview'], ['team', 'Team analysis'], ['press', 'Without the ball'], ['tactics', 'Tactics'], ['players', 'Players'], ['compare', 'Compare'], ['opponents', 'Opponents'], ['matches', 'Matches'], ['data', 'Data']];
+const TABS = [['overview', 'Overview'], ['team', 'Team analysis'], ['press', 'Without the ball'], ['tactics', 'Tactics'], ['players', 'Players'], ['key', 'Key players'], ['compare', 'Compare'], ['opponents', 'Opponents'], ['matches', 'Matches'], ['data', 'Data']];
 
 /* ---------- DOM helpers ---------- */
 function h(tag, a, ...kids) {
@@ -328,19 +328,24 @@ function passNetwork(matches, T, color) {
 }
 
 /* ---------- Charts ---------- */
-function lineChart(box, { series, labels, tipFor, yFmt = (v) => v.toFixed(1), height = 230 }) {
+function lineChart(box, { series, labels, tipFor, yFmt = (v) => v.toFixed(1), height = 230, zero = true }) {
   const W = Math.max(280, box.clientWidth || 600), H = height, m = { l: 34, r: 12, t: 12, b: 26 };
   const n = labels.length;
-  const ymax = Math.max(0.5, ...series.flatMap((s) => s.values)) * 1.08;
-  const raw = ymax / 5, mag = Math.pow(10, Math.floor(Math.log10(raw))), r = raw / mag;
+  const all = series.flatMap((s) => s.values.concat(s.points || [])).filter((v) => has(v));
+  const dmax = Math.max(...all), dmin = Math.min(...all);
+  // zero: axis from 0 (counts); otherwise fitted to the data (ratings, percentages)
+  const ymax = zero ? Math.max(0.5, dmax) * 1.08 : dmax + Math.max(0.05, (dmax - dmin) * 0.12);
+  const span0 = zero ? ymax : ymax - (dmin - Math.max(0.05, (dmax - dmin) * 0.12));
+  const raw = span0 / 5, mag = Math.pow(10, Math.floor(Math.log10(raw))), r = raw / mag;
   const step = (r <= 1 ? 1 : r <= 2 ? 2 : r <= 2.5 ? 2.5 : r <= 5 ? 5 : 10) * mag; // about five gridlines
   const top = Math.ceil(ymax / step) * step;
+  const bot = zero ? 0 : Math.max(0, Math.floor((dmin - Math.max(0.05, (dmax - dmin) * 0.12)) / step) * step);
   const X = (i) => m.l + (n <= 1 ? (W - m.l - m.r) / 2 : (i * (W - m.l - m.r)) / (n - 1));
-  const Y = (v) => m.t + (H - m.t - m.b) * (1 - v / top);
+  const Y = (v) => m.t + (H - m.t - m.b) * (1 - (v - bot) / (top - bot || 1));
   const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img' });
   const ax = sv('g', { class: 'axis' });
-  for (let v = 0; v <= top + 1e-9; v += step) {
-    ax.append(sv('line', { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), class: v === 0 ? 'baseline' : 'grid-line' }));
+  for (let v = bot; v <= top + 1e-9; v += step) {
+    ax.append(sv('line', { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), class: v === bot ? 'baseline' : 'grid-line' }));
     ax.append(sv('text', { x: m.l - 6, y: Y(v) + 4, 'text-anchor': 'end', text: yFmt(v) }));
   }
   const every = Math.max(1, Math.ceil(n / Math.floor((W - m.l) / 44)));
@@ -350,6 +355,7 @@ function lineChart(box, { series, labels, tipFor, yFmt = (v) => v.toFixed(1), he
     const d = s.values.map((v, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1)).join('');
     svg.append(sv('path', { d, fill: 'none', stroke: s.color, 'stroke-width': 2, 'stroke-dasharray': s.dash || null, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
     s.values.forEach((v, i) => svg.append(sv('circle', { cx: X(i), cy: Y(v), r: i === n - 1 ? 4 : 2.6, fill: s.color, stroke: css('--surface'), 'stroke-width': 1.5 })));
+    if (s.points) s.points.forEach((v, i) => has(v) && svg.append(sv('circle', { cx: X(i), cy: Y(v), r: 3.4, fill: s.color, 'fill-opacity': 0.28, stroke: 'none' }))); // single values behind an average line
   });
   const cross = sv('line', { y1: m.t, y2: H - m.b, stroke: css('--muted'), 'stroke-width': 1, opacity: 0 });
   svg.append(cross);
@@ -444,7 +450,7 @@ function render() {
   hideTip();
   renderChrome();
   mainEl.replaceChildren();
-  const views = { overview: viewOverview, team: viewTeam, press: viewPress, tactics: viewTactics, players: viewPlayers, compare: viewCompare, opponents: viewOpponents, matches: viewMatches, data: viewData };
+  const views = { overview: viewOverview, team: viewTeam, press: viewPress, tactics: viewTactics, players: viewPlayers, key: viewKey, compare: viewCompare, opponents: viewOpponents, matches: viewMatches, data: viewData };
   (views[S.tab] || viewOverview)(mainEl);
 }
 

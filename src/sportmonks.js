@@ -14,6 +14,9 @@ const SM_PLAYER = {
   'Shots Total': 'sh', 'Shots On Target': 'sot', Tackles: 'tkl', Interceptions: 'int', 'Ball Recovery': 'rec', Clearances: 'clr',
   'Total Duels': 'duel', 'Duels Won': 'duelW', 'Dribble Attempts': 'drb', 'Successful Dribbles': 'drbW', Fouls: 'fls', 'Total Crosses': 'cross',
   Yellowcards: 'yc', Saves: 'saves', 'Goalkeeper Goals Conceded': 'gaK',
+  'Aerials Won': 'aerW', 'Aerials Lost': 'aerL', 'Tackles Won': 'tklW', 'Big Chances Created': 'bcc', 'Passes In Final Third': 'f3p',
+  'Long Balls': 'lb', 'Long Balls Won': 'lbW', 'Possession Lost': 'pLost', Dispossessed: 'disp', 'Dribbled Past': 'drbPast',
+  'Blocked Shots': 'blk', 'Fouls Drawn': 'fd', 'Error Lead To Shot': 'errSh', 'Error Lead To Goal': 'errG', 'Man of Match': 'motm', 'Accurate Crosses': 'crossOk',
 };
 const smIsBundle = (d) => d && d.source === 'sportmonks' && Array.isArray(d.fixtures);
 
@@ -89,7 +92,7 @@ function attachSportmonks(db, b) {
       if (!Object.keys(d).length) return; // unused substitute
       const s = blankPlayer();
       ['xg', 'npxg', 'xa', 'prog', 'progC', 'f3e', 'boxT', 'ca'].forEach((k) => (s[k] = NaN));
-      Object.values(SM_PLAYER).forEach((k) => { if (!seen.has(k)) s[k] = NaN; });
+      Object.values(SM_PLAYER).forEach((k) => { s[k] = seen.has(k) ? s[k] || 0 : NaN; }); // a stat the file has but this player didn't record is 0
       Object.entries(d).forEach(([k, v]) => {
         const name = typeOf[k], fld = SM_PLAYER[name];
         if (fld) s[fld] = (s[fld] || 0) + v;

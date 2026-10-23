@@ -25,6 +25,7 @@ belongs to that browser on that device.
 - `src/fbref.js` – FBref player table importer (season totals per player)
 - `src/sportmonks.js` – Sportmonks importer (line-ups, events, player match stats), added on top of a season
 - `src/pressing.js` – Without the ball tab: ball winning, losses of the ball, time to win it back, 360 positions
+- `src/assessment.js` – Key players tab: position-based player ratings, squad leaders, season improvement
 - `src/opponents.js` – Opponents tab: record against each club, this season and all-time
 - `src/store.js` – saves imports in the browser and restores them on open; built-in snapshot
 - `tools/embed-snapshot.mjs` – used by `build.sh --with-snapshot`
@@ -125,3 +126,14 @@ node tools/fetch-statsbomb.mjs --competition 55 --season 282    # Euro 2024, all
 Drop the saved file into the Data tab. Event data is shown for that visit and not saved, so saved
 season data stays. For the snapshot build, the sample comes from `data/sample/` via the
 manifest's `sample` entry. Data: [StatsBomb Open Data](https://github.com/statsbomb/open-data).
+
+## Key players
+Rates every player against league players in the same position (goalkeeper, defender, midfielder,
+forward), per 90 minutes, on whatever stats the data has: goals, creating (key passes, big chances,
+dribbles), passing, defending (tackles won, interceptions, recoveries, clearances, blocks), duels and
+headers won, ball security (possession lost, dispossessed, errors) and team impact (goal difference
+while on, points per match, match rating). Each area is an average of percentiles; areas are weighted
+by position into a performance score, and importance = performance × (0.4 + 0.6 × share of minutes).
+Players with few minutes are pulled towards average. The tab also lists squad leaders, results with and
+without each starter, and **season improvement**: each player's early matches against his recent ones
+for match rating or a chosen stat, with a match-by-match trend and 3-match rolling average.
