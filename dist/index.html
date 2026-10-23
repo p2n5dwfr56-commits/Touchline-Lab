@@ -1053,7 +1053,7 @@ function prepareDB(db) {
   return db;
 }
 function leagueTable(db, matches) {
-  const rows = db.teams.map((t) => ({ team: t, a: aggTeam(matches || db.matches, t.id) })).filter((r) => r.a.n);
+  const rows = db.teams.map((t) => ({ team: t, a: aggTeam(matches || db.results || db.matches, t.id) })).filter((r) => r.a.n); // results include fixtures without match detail
   rows.sort((x, y) => y.a.pts - x.a.pts || (y.a.g - y.a.ga) - (x.a.g - x.a.ga) || y.a.g - x.a.g || x.team.name.localeCompare(y.team.name));
   rows.forEach((r, i) => (r.pos = i + 1));
   return rows;
@@ -1140,11 +1140,25 @@ function afFixtures(files) {
 }
 function isApiFootball(files) { return afFixtures(files).length > 0; }
 
+const afRound = (x, fallback) => { const rd = String((x.league && x.league.round) || '').match(/(\d+)\s*$/); return rd ? +rd[1] : fallback; };
+// A fixture from the season list without match details: counts in the league table and form only.
+function afResultsOnly(x, H, A, hg, ag) {
+  const ts = {};
+  [H, A].forEach((T) => {
+    const s = blankTeam();
+    Object.keys(s).forEach((k) => { if (typeof s[k] === 'number') s[k] = NaN; });
+    s.n = 1; s.g = T === H ? hg : ag; s.ga = T === H ? ag : hg;
+    s.w = s.g > s.ga ? 1 : 0; s.d = s.g === s.ga ? 1 : 0; s.l = s.g < s.ga ? 1 : 0; s.pts = 3 * s.w + s.d;
+    ts[T] = s;
+  });
+  return { id: 'af' + x.fixture.id, round: afRound(x, 0), date: (x.fixture.date || '').slice(0, 10), home: H, away: A, hg, ag, forms: {}, lineups: { [H]: [], [A]: [] }, subs: { [H]: [], [A]: [] }, minutes: {}, events: [], poss: [], ts, ps: {}, timeline: [], detail: false };
+}
+
 function importApiFootball(files) {
   const all = afFixtures(files);
   const fx = all.filter((x) => ['FT', 'AET', 'PEN'].includes(x.fixture.status && x.fixture.status.short));
   const teams = {}, players = {}, roleCount = {};
-  const matches = [];
+  const matches = [], results = [];
   let league = null;
   const addPlayer = (id, team, name, num, pos) => {
     if (!players[id]) players[id] = { id, team, name: name || 'Unknown', num: num == null ? null : num, group: AF_POS_GROUP[pos] || 'MID', role: null };
@@ -1161,6 +1175,8 @@ function importApiFootball(files) {
     const H = 'a' + x.teams.home.id, A = 'a' + x.teams.away.id;
     [x.teams.home, x.teams.away].forEach((t) => { if (!teams['a' + t.id]) teams['a' + t.id] = { id: 'a' + t.id, name: t.name, style: null }; });
     const hg = x.goals && x.goals.home != null ? x.goals.home : 0, ag = x.goals && x.goals.away != null ? x.goals.away : 0;
+    const detail = (x.lineups && x.lineups.length) || (x.statistics && x.statistics.length) || (x.players && x.players.length);
+    if (!detail) { results.push(afResultsOnly(x, H, A, hg, ag)); return; }
     const forms = {}, lineups = { [H]: [], [A]: [] }, minutes = {}, subs = { [H]: [], [A]: [] }, ts = {}, ps = {};
 
     // Line-ups and formations
@@ -1259,8 +1275,9 @@ function importApiFootball(files) {
       const min = ((ev.time && ev.time.elapsed) || 0) + ((ev.time && ev.time.extra) || 0);
       const pl = ev.player && ev.player.id ? 'a' + ev.player.id : null;
       const as = ev.assist && ev.assist.id ? 'a' + ev.assist.id : null;
-      if (pl) addPlayer(pl, T, ev.player.name);
-      if (as) addPlayer(as, T, ev.assist.name);
+      // Only register unknown players here: an own goal is listed under the team that benefits.
+      if (pl && !players[pl]) addPlayer(pl, T, ev.player.name);
+      if (as && !players[as]) addPlayer(as, T, ev.assist.name);
       const type = String(ev.type || '').toLowerCase();
       if (type === 'goal') {
         if (/missed/i.test(ev.detail || '')) return;
@@ -1290,19 +1307,23 @@ function importApiFootball(files) {
       });
     });
 
-    const rd = String((x.league && x.league.round) || '').match(/(\d+)\s*$/);
-    matches.push({
-      id: 'af' + x.fixture.id, round: rd ? +rd[1] : matches.length + 1, date: (x.fixture.date || '').slice(0, 10),
+    const m = {
+      id: 'af' + x.fixture.id, round: afRound(x, matches.length + 1), date: (x.fixture.date || '').slice(0, 10),
       home: H, away: A, hg, ag, forms, lineups, subs, minutes, events: [], poss: [], ts, ps, timeline,
-    });
+    };
+    matches.push(m);
+    results.push(m);
   });
   Object.entries(roleCount).forEach(([pid, rc]) => { if (players[pid]) players[pid].role = Object.entries(rc).sort((a, b) => b[1] - a[1])[0][0]; });
   const season = league && league.season;
-  const label = league ? `${league.name} ${season}/${String((season + 1) % 100).padStart(2, '0')} (API-Football)` : 'API-Football data';
+  const partial = matches.length < results.length ? `, ${matches.length} of ${results.length} matches in detail` : '';
+  const label = league ? `${league.name} ${season}/${String((season + 1) % 100).padStart(2, '0')} (API-Football${partial})` : 'API-Football data';
   const errors = [];
   if (!all.length) errors.push('No API-Football fixtures found in the files.');
   else if (!fx.length) errors.push('The files contain fixtures, but none are finished yet.');
-  return { db: { source: 'api-football', label, teams: Object.values(teams), players, matches }, errors };
+  else if (!matches.length) errors.push('The file has the fixture list but no match details yet. Run the download script again.');
+  results.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  return { db: { source: 'api-football', label, teams: Object.values(teams), players, matches, results, coverage: { detailed: matches.length, total: results.length } }, errors };
 }
 
 if (typeof module !== 'undefined') module.exports = { importApiFootball, isApiFootball };
@@ -1721,7 +1742,7 @@ function viewOverview(el) {
   const table = leagueTable(DB, null);
   const row = table.find((r) => r.team.id === T);
   const all = teamMatches(T, 'all');
-  const form = all.slice(-5).map((m) => result(m, T));
+  const form = (DB.results || DB.matches).filter((m) => m.home === T || m.away === T).slice(-5).map((m) => result(m, T));
   el.append(h('div', { class: 'hero' },
     h('h1', { text: teamName(T) }),
     h('div', { class: 'meta' },
@@ -2287,13 +2308,13 @@ function viewData(el) {
     card('Import data', 'API-Football or StatsBomb files · they stay in your browser, nothing is uploaded', drop, status,
       DB.source !== 'demo' ? h('div', { style: { marginTop: '12px' } }, h('button', { class: 'btn ghost', type: 'button', onclick: () => { DB = DEMO; cache.clear(); S.team = 'ABE'; S.cmp = 'CEL'; S.range = 'season'; S.player = null; S.match = null; S.pA = S.pB = null; render(); }, text: 'Back to demo season' })) : null,
       h('p', { class: 'note', text: 'StatsBomb tip: in the open-data repository, events live in data/events/ and fixtures in data/matches/<competition_id>/<season_id>.json. Load several matches from one competition to unlock league tables and rankings.' })),
-    card('Real Aberdeen data from API-Football', 'Free tier: about 100 requests a day, enough for a full season', h('div', { class: 'prose' },
+    card('Real Aberdeen data from API-Football', 'Free plan: seasons 2022/23 to 2024/25, about 95 matches a day', h('div', { class: 'prose' },
       h('ol', null,
         h('li', null, 'Get a free key at ', h('a', { href: 'https://dashboard.api-football.com', target: '_blank', rel: 'noopener', text: 'dashboard.api-football.com' }), '.'),
-        h('li', null, 'Install ', h('a', { href: 'https://nodejs.org', target: '_blank', rel: 'noopener', text: 'Node.js' }), ' (version 18 or newer), download the Touchline Lab repository, and in its folder run:', h('pre', { class: 'cmd', text: 'API_FOOTBALL_KEY=your_key node tools/fetch-api-football.mjs --season 2025' }), 'On Windows PowerShell: ', h('code', { text: '$env:API_FOOTBALL_KEY="your_key"' }), ' first, then the node command.'),
-        h('li', null, 'Drop the saved ', h('code', { text: 'api-football-179-2025.json' }), ' into the import box. Season years are the starting year, so 2025 means 2025/26. League 179 is the Scottish Premiership; ', h('code', { text: '--find "Premiership"' }), ' lists others.')),
+        h('li', null, 'Install ', h('a', { href: 'https://nodejs.org', target: '_blank', rel: 'noopener', text: 'Node.js' }), ' (version 18 or newer), download the Touchline Lab repository, and in its folder run:', h('pre', { class: 'cmd', text: 'API_FOOTBALL_KEY=your_key node tools/fetch-api-football.mjs --season 2024' }), 'On Windows PowerShell: ', h('code', { text: '$env:API_FOOTBALL_KEY="your_key"' }), ' first, then the node command.'),
+        h('li', null, 'Drop the saved ', h('code', { text: 'api-football-179-2024.json' }), ' into the import box. Season years are the starting year, so 2024 means 2024/25. League 179 is the Scottish Premiership; ', h('code', { text: '--find "Premiership"' }), ' lists others.')),
       h('p', null, 'You get results, league table, line-ups and formations, team match stats (shots, possession, passing, corners, cards, and xG where the feed has it) and player stats with ratings. Heatmaps, passing networks and game states still need event data with pitch locations.'),
-      h('p', null, 'The free plan may only cover some seasons. If the season you ask for is not included, the script prints the message from API-Football.')))));
+      h('p', null, 'The free plan fetches one match per request, so a full 228-match season takes about three days. Run the same command once a day: Aberdeen\u2019s matches come first, finished matches are kept, and the league table is complete from day one. Paid plans cover the current season and fetch it in one go.')))));
 }
 
 /* ---------- Boot ---------- */

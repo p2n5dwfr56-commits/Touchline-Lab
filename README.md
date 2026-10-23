@@ -28,11 +28,14 @@ Aberdeen data. Pitch maps stay empty with this source.
 
 ```sh
 # Node 18+, free key from https://dashboard.api-football.com
-API_FOOTBALL_KEY=your_key node tools/fetch-api-football.mjs --season 2025   # 2025 = 2025/26
+API_FOOTBALL_KEY=your_key node tools/fetch-api-football.mjs --season 2024   # 2024 = 2024/25
 API_FOOTBALL_KEY=your_key node tools/fetch-api-football.mjs --find "Premiership"  # look up league ids
 ```
 
-League 179 (Scottish Premiership) is the default. A full season costs about 12 requests (the free
-plan allows 100 a day). Then drop the saved `api-football-179-<season>.json` into the Data tab.
+League 179 (Scottish Premiership) is the default. The free plan covers seasons 2022 to 2024 only and
+fetches one match per request (100 requests a day), so a full season takes about three daily runs.
+Re-run the same command each day: Aberdeen's matches come first, downloaded matches are cached in
+`api-football-cache/`, and the league table is complete from the first run. Paid plans fetch 20
+matches per request. Then drop the saved `api-football-179-<season>.json` into the Data tab.
 If players look mirrored left/right on the Tactics board, flip `AF_GRID_COL1_LEFT` in
 `src/apifootball.js` and rebuild.

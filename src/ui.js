@@ -413,7 +413,7 @@ function viewOverview(el) {
   const table = leagueTable(DB, null);
   const row = table.find((r) => r.team.id === T);
   const all = teamMatches(T, 'all');
-  const form = all.slice(-5).map((m) => result(m, T));
+  const form = (DB.results || DB.matches).filter((m) => m.home === T || m.away === T).slice(-5).map((m) => result(m, T));
   el.append(h('div', { class: 'hero' },
     h('h1', { text: teamName(T) }),
     h('div', { class: 'meta' },
@@ -979,13 +979,13 @@ function viewData(el) {
     card('Import data', 'API-Football or StatsBomb files · they stay in your browser, nothing is uploaded', drop, status,
       DB.source !== 'demo' ? h('div', { style: { marginTop: '12px' } }, h('button', { class: 'btn ghost', type: 'button', onclick: () => { DB = DEMO; cache.clear(); S.team = 'ABE'; S.cmp = 'CEL'; S.range = 'season'; S.player = null; S.match = null; S.pA = S.pB = null; render(); }, text: 'Back to demo season' })) : null,
       h('p', { class: 'note', text: 'StatsBomb tip: in the open-data repository, events live in data/events/ and fixtures in data/matches/<competition_id>/<season_id>.json. Load several matches from one competition to unlock league tables and rankings.' })),
-    card('Real Aberdeen data from API-Football', 'Free tier: about 100 requests a day, enough for a full season', h('div', { class: 'prose' },
+    card('Real Aberdeen data from API-Football', 'Free plan: seasons 2022/23 to 2024/25, about 95 matches a day', h('div', { class: 'prose' },
       h('ol', null,
         h('li', null, 'Get a free key at ', h('a', { href: 'https://dashboard.api-football.com', target: '_blank', rel: 'noopener', text: 'dashboard.api-football.com' }), '.'),
-        h('li', null, 'Install ', h('a', { href: 'https://nodejs.org', target: '_blank', rel: 'noopener', text: 'Node.js' }), ' (version 18 or newer), download the Touchline Lab repository, and in its folder run:', h('pre', { class: 'cmd', text: 'API_FOOTBALL_KEY=your_key node tools/fetch-api-football.mjs --season 2025' }), 'On Windows PowerShell: ', h('code', { text: '$env:API_FOOTBALL_KEY="your_key"' }), ' first, then the node command.'),
-        h('li', null, 'Drop the saved ', h('code', { text: 'api-football-179-2025.json' }), ' into the import box. Season years are the starting year, so 2025 means 2025/26. League 179 is the Scottish Premiership; ', h('code', { text: '--find "Premiership"' }), ' lists others.')),
+        h('li', null, 'Install ', h('a', { href: 'https://nodejs.org', target: '_blank', rel: 'noopener', text: 'Node.js' }), ' (version 18 or newer), download the Touchline Lab repository, and in its folder run:', h('pre', { class: 'cmd', text: 'API_FOOTBALL_KEY=your_key node tools/fetch-api-football.mjs --season 2024' }), 'On Windows PowerShell: ', h('code', { text: '$env:API_FOOTBALL_KEY="your_key"' }), ' first, then the node command.'),
+        h('li', null, 'Drop the saved ', h('code', { text: 'api-football-179-2024.json' }), ' into the import box. Season years are the starting year, so 2024 means 2024/25. League 179 is the Scottish Premiership; ', h('code', { text: '--find "Premiership"' }), ' lists others.')),
       h('p', null, 'You get results, league table, line-ups and formations, team match stats (shots, possession, passing, corners, cards, and xG where the feed has it) and player stats with ratings. Heatmaps, passing networks and game states still need event data with pitch locations.'),
-      h('p', null, 'The free plan may only cover some seasons. If the season you ask for is not included, the script prints the message from API-Football.')))));
+      h('p', null, 'The free plan fetches one match per request, so a full 228-match season takes about three days. Run the same command once a day: Aberdeen\u2019s matches come first, finished matches are kept, and the league table is complete from day one. Paid plans cover the current season and fetch it in one go.')))));
 }
 
 /* ---------- Boot ---------- */

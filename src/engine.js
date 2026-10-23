@@ -788,7 +788,7 @@ function prepareDB(db) {
   return db;
 }
 function leagueTable(db, matches) {
-  const rows = db.teams.map((t) => ({ team: t, a: aggTeam(matches || db.matches, t.id) })).filter((r) => r.a.n);
+  const rows = db.teams.map((t) => ({ team: t, a: aggTeam(matches || db.results || db.matches, t.id) })).filter((r) => r.a.n); // results include fixtures without match detail
   rows.sort((x, y) => y.a.pts - x.a.pts || (y.a.g - y.a.ga) - (x.a.g - x.a.ga) || y.a.g - x.a.g || x.team.name.localeCompare(y.team.name));
   rows.forEach((r, i) => (r.pos = i + 1));
   return rows;

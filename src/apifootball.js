@@ -61,11 +61,25 @@ function afFixtures(files) {
 }
 function isApiFootball(files) { return afFixtures(files).length > 0; }
 
+const afRound = (x, fallback) => { const rd = String((x.league && x.league.round) || '').match(/(\d+)\s*$/); return rd ? +rd[1] : fallback; };
+// A fixture from the season list without match details: counts in the league table and form only.
+function afResultsOnly(x, H, A, hg, ag) {
+  const ts = {};
+  [H, A].forEach((T) => {
+    const s = blankTeam();
+    Object.keys(s).forEach((k) => { if (typeof s[k] === 'number') s[k] = NaN; });
+    s.n = 1; s.g = T === H ? hg : ag; s.ga = T === H ? ag : hg;
+    s.w = s.g > s.ga ? 1 : 0; s.d = s.g === s.ga ? 1 : 0; s.l = s.g < s.ga ? 1 : 0; s.pts = 3 * s.w + s.d;
+    ts[T] = s;
+  });
+  return { id: 'af' + x.fixture.id, round: afRound(x, 0), date: (x.fixture.date || '').slice(0, 10), home: H, away: A, hg, ag, forms: {}, lineups: { [H]: [], [A]: [] }, subs: { [H]: [], [A]: [] }, minutes: {}, events: [], poss: [], ts, ps: {}, timeline: [], detail: false };
+}
+
 function importApiFootball(files) {
   const all = afFixtures(files);
   const fx = all.filter((x) => ['FT', 'AET', 'PEN'].includes(x.fixture.status && x.fixture.status.short));
   const teams = {}, players = {}, roleCount = {};
-  const matches = [];
+  const matches = [], results = [];
   let league = null;
   const addPlayer = (id, team, name, num, pos) => {
     if (!players[id]) players[id] = { id, team, name: name || 'Unknown', num: num == null ? null : num, group: AF_POS_GROUP[pos] || 'MID', role: null };
@@ -82,6 +96,8 @@ function importApiFootball(files) {
     const H = 'a' + x.teams.home.id, A = 'a' + x.teams.away.id;
     [x.teams.home, x.teams.away].forEach((t) => { if (!teams['a' + t.id]) teams['a' + t.id] = { id: 'a' + t.id, name: t.name, style: null }; });
     const hg = x.goals && x.goals.home != null ? x.goals.home : 0, ag = x.goals && x.goals.away != null ? x.goals.away : 0;
+    const detail = (x.lineups && x.lineups.length) || (x.statistics && x.statistics.length) || (x.players && x.players.length);
+    if (!detail) { results.push(afResultsOnly(x, H, A, hg, ag)); return; }
     const forms = {}, lineups = { [H]: [], [A]: [] }, minutes = {}, subs = { [H]: [], [A]: [] }, ts = {}, ps = {};
 
     // Line-ups and formations
@@ -180,8 +196,9 @@ function importApiFootball(files) {
       const min = ((ev.time && ev.time.elapsed) || 0) + ((ev.time && ev.time.extra) || 0);
       const pl = ev.player && ev.player.id ? 'a' + ev.player.id : null;
       const as = ev.assist && ev.assist.id ? 'a' + ev.assist.id : null;
-      if (pl) addPlayer(pl, T, ev.player.name);
-      if (as) addPlayer(as, T, ev.assist.name);
+      // Only register unknown players here: an own goal is listed under the team that benefits.
+      if (pl && !players[pl]) addPlayer(pl, T, ev.player.name);
+      if (as && !players[as]) addPlayer(as, T, ev.assist.name);
       const type = String(ev.type || '').toLowerCase();
       if (type === 'goal') {
         if (/missed/i.test(ev.detail || '')) return;
@@ -211,19 +228,23 @@ function importApiFootball(files) {
       });
     });
 
-    const rd = String((x.league && x.league.round) || '').match(/(\d+)\s*$/);
-    matches.push({
-      id: 'af' + x.fixture.id, round: rd ? +rd[1] : matches.length + 1, date: (x.fixture.date || '').slice(0, 10),
+    const m = {
+      id: 'af' + x.fixture.id, round: afRound(x, matches.length + 1), date: (x.fixture.date || '').slice(0, 10),
       home: H, away: A, hg, ag, forms, lineups, subs, minutes, events: [], poss: [], ts, ps, timeline,
-    });
+    };
+    matches.push(m);
+    results.push(m);
   });
   Object.entries(roleCount).forEach(([pid, rc]) => { if (players[pid]) players[pid].role = Object.entries(rc).sort((a, b) => b[1] - a[1])[0][0]; });
   const season = league && league.season;
-  const label = league ? `${league.name} ${season}/${String((season + 1) % 100).padStart(2, '0')} (API-Football)` : 'API-Football data';
+  const partial = matches.length < results.length ? `, ${matches.length} of ${results.length} matches in detail` : '';
+  const label = league ? `${league.name} ${season}/${String((season + 1) % 100).padStart(2, '0')} (API-Football${partial})` : 'API-Football data';
   const errors = [];
   if (!all.length) errors.push('No API-Football fixtures found in the files.');
   else if (!fx.length) errors.push('The files contain fixtures, but none are finished yet.');
-  return { db: { source: 'api-football', label, teams: Object.values(teams), players, matches }, errors };
+  else if (!matches.length) errors.push('The file has the fixture list but no match details yet. Run the download script again.');
+  results.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  return { db: { source: 'api-football', label, teams: Object.values(teams), players, matches, results, coverage: { detailed: matches.length, total: results.length } }, errors };
 }
 
 if (typeof module !== 'undefined') module.exports = { importApiFootball, isApiFootball };
