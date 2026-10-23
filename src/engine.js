@@ -784,6 +784,13 @@ const PLAYER_METRICS = [
   { k: 'touch', l: 'Touches', f: (a) => a.touch, p90: true, d: 1 },
   { k: 'fls', l: 'Fouls committed', f: (a) => a.fls, p90: true, d: 2 },
   { k: 'rating', l: 'Average match rating', f: (a) => (a.rtN ? a.rt / a.rtN : NaN), d: 2 },
+  // Season-total sources (FBref) only; undefined elsewhere, so hidden
+  { k: 'yc', l: 'Yellow cards', f: (a) => a.yc, p90: true, d: 2 },
+  { k: 'onGD', l: 'Team goal difference while on the pitch', f: (a) => (has(a.onG) && has(a.onGA) ? a.onG - a.onGA : NaN), p90: true, d: 2 },
+  { k: 'ppm', l: 'Team points per match played', f: (a) => a.ppm, d: 2 },
+  { k: 'savePct', l: 'Save %', f: (a) => (a.sota ? (100 * a.saves) / a.sota : NaN), d: 1 },
+  { k: 'gaK', l: 'Goals conceded', f: (a) => a.gaK, p90: true, d: 2 },
+  { k: 'cs', l: 'Clean sheets', f: (a) => a.cs, d: 0 },
 ];
 function playerValue(mt, a, per90) { const v = mt.f(a); return per90 && mt.p90 ? safe(v * 90, a.min) : v; }
 

@@ -30,10 +30,14 @@ No players, line-ups or pitch locations, so Players, Tactics and the pitch maps 
 **FBref player tables** (season totals per player). Add them on top of a loaded season: on a squad
 page (e.g. https://fbref.com/en/squads/8bbab7cf/Aberdeen-Stats) use Share & Export > Get table as
 CSV, or copy the table itself, and paste it into the Data tab's FBref box (or drop a saved .csv).
-Standard Stats gives minutes, goals, assists, xG, xAG and progressive passes/carries; Shooting,
-Passing, Defensive Actions, Possession and Miscellaneous fill in more columns. Columns are matched
-by name, so FBref layout changes are tolerated. Add several teams to get league-wide percentiles.
-FBref blocks automated downloads, so this is copy-and-paste by design.
+Standard Stats gives appearances, minutes, goals, assists and cards; Shooting adds shots and shots
+on target; Goalkeeping adds saves, save % and clean sheets; Playing Time adds team goal difference
+while on the pitch and points per match. (FBref dropped its xG and progression columns for 2026/27;
+they are read if present.) The team's **Scores & Fixtures** table adds each match's formations,
+possession, attendance and referee, matched to the loaded season by date and opponent, plus the
+upcoming fixtures. Columns are matched by name, so FBref layout changes are tolerated. Add several
+teams to get league-wide percentiles. FBref blocks automated downloads, so this is copy-and-paste by
+design.
 
 **StatsBomb event data** (every pass, shot and tackle with pitch coordinates, 120 x 80 yards,
 each team attacking left to right). Drives every view, including heatmaps and passing networks.

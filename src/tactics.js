@@ -200,8 +200,67 @@ function lineupList(sel, T, single) {
   return list;
 }
 
+/* Shape only: positions from the formation string, labelled by role (used when there are no line-ups). */
+function formationBoard(form, color) {
+  const parts = String(form).split('-').map(Number).filter((n) => n > 0);
+  const p = pitch();
+  const roles = ['GK'].concat(...afRoles(parts));
+  const pts = roles.map((r, i) => slotTemplate(form, r, i));
+  let i = 1;
+  parts.forEach((c) => {
+    const row = pts.slice(i, i + c).slice().sort((a, b) => a[1] - b[1]);
+    if (row.length > 1) p.marks.append(sv('polyline', { points: row.map((q) => q[0].toFixed(1) + ',' + q[1].toFixed(1)).join(' '), fill: 'none', stroke: css('--ink-2'), 'stroke-opacity': 0.55, 'stroke-width': 0.5 }));
+    i += c;
+  });
+  roles.forEach((r, k) => {
+    const [x, y] = pts[k];
+    p.marks.append(sv('circle', { cx: x, cy: y, r: 3.6, fill: color, stroke: css('--surface'), 'stroke-width': 0.5 }));
+    p.marks.append(sv('text', { x, y: y + 0.9, 'text-anchor': 'middle', 'font-size': r.length > 2 ? 2 : 2.4, 'font-weight': 700, fill: '#fff', style: 'font-family: var(--font-display)', text: r }));
+  });
+  p.svg.setAttribute('aria-label', 'Formation ' + form);
+  return p.svg;
+}
+function formationsTable(T, used, selected) {
+  return h('table', null,
+    h('thead', null, h('tr', null, ['Formation', 'Played', 'W', 'D', 'L', 'Pts/G', 'xG', 'xGA', 'Poss'].map((c, i) => h('th', { class: i ? '' : 'l', text: c })))),
+    h('tbody', null, used.map(([f, list]) => {
+      const a = aggTeam(list, T);
+      return h('tr', { class: f === selected ? 'focus' : '', onclick: () => { S.form = f; render(); }, title: 'Show ' + f },
+        h('td', { class: 'l', text: f }), h('td', { text: list.length }), h('td', { text: a.w }), h('td', { text: a.d }), h('td', { text: a.l }),
+        h('td', { text: (a.pts / a.n).toFixed(2) }), h('td', { text: fmt(a.xg / a.n, 2) }), h('td', { text: fmt(a.xga / a.n, 2) }), h('td', { text: has(TM.poss.f(a)) ? TM.poss.f(a).toFixed(0) + '%' : '–' }));
+    })));
+}
+function viewFormationsOnly(el, T, ms, A) {
+  el.append(h('div', { class: 'hero' }, h('h1', { text: teamName(T) }), h('div', { class: 'meta' }, h('span', { text: rangeLabel() + ' · ' + ms.length + (ms.length === 1 ? ' match' : ' matches') + ' with a formation' }))));
+  const forms = {};
+  ms.forEach((m) => (forms[m.forms[T]] = forms[m.forms[T]] || []).push(m));
+  const used = Object.entries(forms).sort((a, b) => b[1].length - a[1].length);
+  const form = S.form && forms[S.form] ? S.form : used[0][0];
+  const grid = h('div', { class: 'grid' });
+  el.append(grid);
+  const tools = used.length > 1 ? seg(used.map(([f, l]) => [f, f + ' (' + l.length + ')']), form, (v) => { S.form = v; render(); }, 'Formation') : null;
+  const list = h('div', { class: 'mlist' }, forms[form].map((m) => {
+    const r = result(m, T), O = oppOf(m, T);
+    return h('div', { class: 'mrow', style: { cursor: 'default' } },
+      h('span', { class: 'd', text: fmtDate(m.date) }), h('span', { class: 'res ' + r, text: r }),
+      h('span', null, (m.home === T ? 'v ' : '@ ') + teamName(O)), h('span', { class: 'score', text: goalsFor(m, T) + '–' + goalsAg(m, T) }),
+      h('span', { class: 'xg', title: m.forms[O] ? teamName(O) + ' played ' + m.forms[O] : '', text: m.forms[O] ? 'v ' + m.forms[O] : '' }));
+  }));
+  grid.append(card({ title: 'Formation · ' + form, span: true, tools },
+    `Started in ${forms[form].length} of ${ms.length} matches · shape from the listed formation; there are no line-ups in this data, so no player names · attacking left to right`,
+    h('div', { class: 'board' }, h('div', { class: 'board-pitch' }, formationBoard(form, A)),
+      h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '6px' }, text: 'Matches in this formation' }), list))));
+  grid.append(card('Formations used', 'Per-match averages in each starting formation · click a row to show it', h('div', { class: 'tbl-wrap' }, formationsTable(T, used, form))));
+  grid.append(againstShape(T, ms));
+}
+
 function viewTactics(el) {
-  if (!DB.hasLineups) return missingNote('Tactics', 'Line-ups and formations', el);
+  if (!DB.hasLineups) {
+    // Formations without line-ups (e.g. from FBref's Scores & Fixtures table) still give a shape view
+    const fm = scoped(S.team).filter((m) => m.forms[S.team]);
+    if (!fm.length) return missingNote('Tactics', 'Line-ups and formations', el);
+    return viewFormationsOnly(el, S.team, fm, css('--team-a'));
+  }
   const T = S.team, ms = scoped(T).filter((m) => (m.lineups[S.team] || []).length), A = css('--team-a');
   const single = S.range.startsWith('m:') && ms.length === 1;
   const sel = boardSelection(T, ms);
