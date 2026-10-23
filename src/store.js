@@ -63,7 +63,9 @@ async function savePrimary(texts, label, fbref) {
   return ok;
 }
 async function saveFbref(teamId, teamNameText, texts) {
-  const log = await storeGet('log');
+  let log = await storeGet('log');
+  // On top of the built-in snapshot: save the snapshot as the base, so the new table survives a reload
+  if (!log && DB.snapshot && SNAP) log = { v: 1, savedAt: Date.now(), label: DB.label, primary: SNAP.primary, fbref: snapshotFbref(DB) };
   if (!log) return false; // FBref tables only make sense on top of a saved season
   texts.forEach((t) => {
     if (log.fbref.some((f) => f.team === teamId && f.texts.some((x) => x.text === t.text))) return; // same table pasted again
@@ -77,6 +79,26 @@ async function saveFbref(teamId, teamNameText, texts) {
 async function forgetSaved() {
   await storeSet('log', null);
   STORE.meta = null;
+}
+
+/* Built-in snapshot of real data (present only in builds made with --with-snapshot). */
+const SNAP = typeof SNAPSHOT !== 'undefined' ? SNAPSHOT : null;
+function snapshotFbref(db) {
+  if (!SNAP) return [];
+  return SNAP.fbref.map((f) => { const t = db.teams.find((x) => x.name === f.team); return t ? { team: t.id, teamName: t.name, texts: f.texts } : null; }).filter(Boolean);
+}
+function loadSnapshot() {
+  if (!SNAP) return false;
+  if (!importTexts(SNAP.primary, null, { restore: true })) return false;
+  snapshotFbref(DB).forEach((f) => addFbref(f.texts, f.team, null, { restore: true }));
+  DB.snapshot = SNAP.asOf;
+  return true;
+}
+// Back to real data: the viewer's saved imports if any, else the built-in snapshot
+async function loadRealData() {
+  const r = STORE.meta ? await restoreSaved() : null;
+  if (r && r.ok) return true;
+  return loadSnapshot();
 }
 
 /* On open: rebuild the last session from the saved log. Returns a message, or null if nothing was saved. */

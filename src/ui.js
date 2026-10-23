@@ -8,8 +8,9 @@ const S = {
   tab: 'overview', team: 'ABE', venue: 'all', range: 'season', cmp: 'CEL',
   heat: 'all', shots: 'for', group: 'all', per90: true, sort: 'min', player: null,
   cmpMode: 'teams', pA: null, pB: null, match: null, act: 'pass', form: null, shape: 'plan',
+  opp: null, oppSort: 'next', oppScope: 'league',
 };
-const TABS = [['overview', 'Overview'], ['team', 'Team analysis'], ['tactics', 'Tactics'], ['players', 'Players'], ['compare', 'Compare'], ['matches', 'Matches'], ['data', 'Data']];
+const TABS = [['overview', 'Overview'], ['team', 'Team analysis'], ['tactics', 'Tactics'], ['players', 'Players'], ['compare', 'Compare'], ['opponents', 'Opponents'], ['matches', 'Matches'], ['data', 'Data']];
 
 /* ---------- DOM helpers ---------- */
 function h(tag, a, ...kids) {
@@ -396,8 +397,8 @@ function buildShell() {
 }
 function renderChrome() {
   chipEl.className = 'chip' + (DB.source === 'demo' ? '' : ' real');
-  chipEl.replaceChildren(h('span', { class: 'dot' }), DB.source === 'demo' ? 'Synthetic demo data' : DB.label);
-  chipEl.title = DB.source === 'demo' ? 'Generated sample season. Import real event data in the Data tab.' : '';
+  chipEl.replaceChildren(h('span', { class: 'dot' }), DB.source === 'demo' ? 'Synthetic demo data · invented players' : DB.label + (DB.snapshot ? ' · to ' + fmtDate(DB.snapshot) : ''));
+  chipEl.title = DB.source === 'demo' ? 'Generated sample season. Switch to real data in the Data tab.' : DB.snapshot ? 'Built-in snapshot. Import newer files in the Data tab to update it.' : '';
   const teamSel = h('select', { id: 'f-team', onchange: (e) => { S.team = e.target.value; if (S.cmp === S.team) S.cmp = DB.teams.find((t) => t.id !== S.team).id; if (S.range.startsWith('m:')) S.range = 'season'; S.player = null; S.match = null; S.form = null; render(); } },
     DB.teams.map((t) => h('option', { value: t.id, selected: t.id === S.team, text: t.name })));
   const ms = teamMatches(S.team);
@@ -419,7 +420,7 @@ function render() {
   hideTip();
   renderChrome();
   mainEl.replaceChildren();
-  const views = { overview: viewOverview, team: viewTeam, tactics: viewTactics, players: viewPlayers, compare: viewCompare, matches: viewMatches, data: viewData };
+  const views = { overview: viewOverview, team: viewTeam, tactics: viewTactics, players: viewPlayers, compare: viewCompare, opponents: viewOpponents, matches: viewMatches, data: viewData };
   (views[S.tab] || viewOverview)(mainEl);
 }
 
@@ -1029,8 +1030,9 @@ function addFbref(texts, teamId, statusEl, opts = {}) {
     parts.push(`formations, possession, attendance and referees for ${fx.matched} of ${fx.played} ${teamName(teamId)} matches` + (fx.upcoming ? `, plus ${fx.upcoming} upcoming fixtures` : ''));
     if (fx.unmatched.length) parts.push(`not matched to the loaded season (usually cup games): ${fx.unmatched.slice(0, 4).join('; ')}${fx.unmatched.length > 4 ? '…' : ''}`);
   }
-  S.team = teamId; S.player = null; S.sort = 'min'; S.per90 = true; S.form = null;
-  S.tab = r.fields.length ? 'players' : 'tactics';
+  if (r.records) parts.push(`${teamName(teamId)}’s all-time record against ${r.records.clubs} clubs (${r.records.games.toLocaleString('en-GB')} matches)`);
+  S.team = teamId; S.player = null; S.sort = 'min'; S.per90 = true; S.form = null; S.opp = null;
+  S.tab = r.fields.length ? 'players' : r.records ? 'opponents' : 'tactics';
   render();
   flash('Added ' + parts.join('. ') + '.' + (r.errors.length ? ' ' + r.errors.join(' ') : '') + ' Paste more FBref tables in the Data tab to fill in more.');
   return true;
@@ -1057,13 +1059,14 @@ function fbrefCard() {
 // opts.restore replays saved data quietly at start-up. Returns true when something was loaded.
 function importTexts(texts, statusEl, opts = {}) {
   const fail = (msg) => { if (statusEl) { statusEl.className = 'status err'; statusEl.textContent = msg; } return false; };
+  const prevSnap = DB && DB.snapshot ? DB.label : null; // replacing the built-in snapshot with a newer file for the same season
   // CSV files (football-data.co.uk) and JSON files (API-Football, StatsBomb) are told apart by content.
   const csv = [], parsed = [], fb = [];
   texts.forEach((f) => {
     const t = f.text.replace(/^﻿/, '').trimStart();
     if (t[0] === '[' || t[0] === '{') parsed.push({ name: f.name, data: JSON.parse(t) });
     else if (fdIsCSV(fdParseCSV(t))) csv.push({ name: f.name, rows: fdParseCSV(t) });
-    else if (fbIsTable(fbParse(t)) || fbIsFixtures(fbParse(t))) fb.push({ name: f.name, text: t });
+    else if (fbIsTable(fbParse(t)) || fbIsFixtures(fbParse(t)) || fbIsRecords(fbParse(t))) fb.push({ name: f.name, text: t });
   });
   if (!csv.length && !parsed.length && !fb.length) return fail('These files are not in a format Touchline Lab reads. Use a football-data.co.uk CSV, an FBref player table, the API-Football download, or StatsBomb event files.');
   if (!csv.length && !parsed.length) return addFbref(fb, S.team, statusEl, opts); // FBref tables add to the season already loaded
@@ -1089,6 +1092,7 @@ function importTexts(texts, statusEl, opts = {}) {
   // An updated file for the same season keeps the FBref tables already added to it
   const label = DB.label, thisDB = DB;
   carriedFbref(label).then(async (keep) => {
+    if (!keep.length && prevSnap === label) keep = snapshotFbref(DB); // keep the built-in FBref tables too
     if (keep.length && DB === thisDB) {
       keep.forEach((f) => { if (DB.teamById[f.team]) addFbref(f.texts, f.team, null, { restore: true }); });
       render();
@@ -1099,6 +1103,20 @@ function importTexts(texts, statusEl, opts = {}) {
     if (!ok) flash('Loaded, but this browser would not save it, so it will be gone when you reload the page.', 'err');
   });
   return true;
+}
+function showDemo() {
+  DB = DEMO; cache.clear();
+  S.team = 'ABE'; S.cmp = 'CEL'; S.range = 'season'; S.player = null; S.match = null; S.pA = S.pB = null; S.form = null; S.opp = null;
+}
+// Switch between the synthetic demo season and real data (saved imports or the built-in snapshot)
+function sourceSwitch() {
+  if (DB.source !== 'demo') {
+    return h('div', { class: 'saved' }, h('div', null, h('b', { text: 'Demo season' }), h('div', { class: 'sub', text: 'Synthetic data with pitch locations, for trying the heatmaps, shot maps and passing networks. Its players are invented.' })),
+      h('button', { class: 'btn ghost', type: 'button', text: 'Switch to demo season', onclick: () => { showDemo(); S.tab = 'overview'; render(); } }));
+  }
+  if (!STORE.meta && !SNAP) return null;
+  return h('div', { class: 'saved' }, h('div', null, h('b', { text: 'Real data' }), h('div', { class: 'sub', text: STORE.meta ? 'Your saved imports' : `Built-in 2026/27 data to ${fmtDate(SNAP.asOf)}` })),
+    h('button', { class: 'btn', type: 'button', text: 'Back to real data', onclick: async () => { if (await loadRealData()) { S.tab = 'overview'; render(); } } }));
 }
 function savedPanel() {
   const m = STORE.meta;
@@ -1119,9 +1137,9 @@ function savedPanel() {
   btn.addEventListener('click', async () => {
     if (!armed) { armed = true; btn.textContent = 'Click again to forget it'; return; }
     await forgetSaved();
-    DB = DEMO; cache.clear(); S.team = 'ABE'; S.cmp = 'CEL'; S.range = 'season'; S.player = null; S.match = null; S.pA = S.pB = null; S.form = null;
+    if (!loadSnapshot()) showDemo();
     render();
-    flash('Saved data forgotten. Showing the demo season.');
+    flash(DB.snapshot ? `Saved data forgotten. Showing the built-in data (to ${fmtDate(DB.snapshot)}).` : 'Saved data forgotten. Showing the demo season.');
   });
   wrap.append(h('div', null, h('b', { text: 'Saved in this browser' }), h('div', { class: 'sub', text: what.join(' + ') + ' · last saved ' + when })), btn);
   return wrap;
@@ -1162,7 +1180,7 @@ function viewData(el) {
       h('li', null, h('b', { text: 'Player stats, line-ups and formations' }), ': use the API-Football download below (free plan: past seasons only). Without event locations, the pitch maps stay empty.')));
   const fdUrl = 'https://www.football-data.co.uk/mmz4281/' + seasonCode() + '/SC0.csv';
   el.append(h('div', { class: 'grid' },
-    card('Data source', DB.label, prose),
+    card('Data source', DB.label + (DB.snapshot ? ` · built-in data to ${fmtDate(DB.snapshot)}` : ''), prose, sourceSwitch()),
     fbrefCard(),
     card('This season from football-data.co.uk', 'Free, no account or key · results, team stats and odds', h('div', { class: 'prose' },
       h('ol', null,
@@ -1193,6 +1211,7 @@ function boot() {
     // Bring back the last imported season (and FBref tables) saved in this browser
     loading.textContent = 'Loading your saved data…';
     const restored = await restoreSaved();
+    if (!(restored && restored.ok)) loadSnapshot(); // no saved imports: open on the built-in real data, if this build has it
     render();
     if (restored && restored.error) flash(restored.error, 'err');
     else if (restored && STORE.meta) flash(`Restored your saved data: ${STORE.meta.label || STORE.meta.files.join(', ')}${STORE.meta.fbTables ? ` + ${STORE.meta.fbTables} FBref table${STORE.meta.fbTables > 1 ? 's' : ''}` : ''}. Manage it in the Data tab.`);

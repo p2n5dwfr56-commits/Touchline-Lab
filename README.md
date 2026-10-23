@@ -7,6 +7,11 @@ game states (possession phases), formations and tactical line-ups, and side-by-s
 Open `dist/index.html` in a browser. No server or install needed.
 After editing anything in `src/`, run `./build.sh` to rebuild `dist/index.html`.
 
+`./build.sh --with-snapshot out.html` also embeds the files listed in `data/snapshot/manifest.json`
+(a season file plus FBref tables), so the page opens on that real data instead of the synthetic
+demo season. `data/snapshot/` is not in the repository: it holds third-party data
+(football-data.co.uk, FBref) that is only bundled into the private published copy.
+
 Imported files and pasted FBref tables are saved in the browser (IndexedDB, nothing uploaded) and
 restored when the app is opened again; "Forget saved data" in the Data tab clears them. Saved data
 belongs to that browser on that device.
@@ -18,7 +23,9 @@ belongs to that browser on that device.
 - `src/apifootball.js` – API-Football importer (match/player stats, line-ups, formations)
 - `src/footballdata.js` – football-data.co.uk CSV importer (results, team match stats, odds)
 - `src/fbref.js` – FBref player table importer (season totals per player)
-- `src/store.js` – saves imports in the browser and restores them on open
+- `src/opponents.js` – Opponents tab: record against each club, this season and all-time
+- `src/store.js` – saves imports in the browser and restores them on open; built-in snapshot
+- `tools/embed-snapshot.mjs` – used by `build.sh --with-snapshot`
 - `tools/fetch-api-football.mjs` – downloads a season from API-Football into one file
 - `src/style.css`, `src/head.html` – styling and page head
 
@@ -40,7 +47,8 @@ on target; Goalkeeping adds saves, save % and clean sheets; Playing Time adds te
 while on the pitch and points per match. (FBref dropped its xG and progression columns for 2026/27;
 they are read if present.) The team's **Scores & Fixtures** table adds each match's formations,
 possession, attendance and referee, matched to the loaded season by date and opponent, plus the
-upcoming fixtures. Columns are matched by name, so FBref layout changes are tolerated. Add several
+upcoming fixtures. The **Records vs Opponents** table adds all-time head-to-head records, shown in
+the Opponents tab. Columns are matched by name, so FBref layout changes are tolerated. Add several
 teams to get league-wide percentiles. FBref blocks automated downloads, so this is copy-and-paste by
 design.
 

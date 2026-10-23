@@ -14,7 +14,7 @@ function fbParse(text) {
   // Pasted text may carry page navigation or a citation line above the table, so judge
   // tab- versus comma-separated from the header row itself.
   const lines = text.split(/\r?\n/);
-  const head = lines.find((l) => /(^|[\t,])(Player|Date)([\t,]|$)/.test(l)) || lines.slice(0, 4).join('\n');
+  const head = lines.find((l) => /(^|[\t,])(Player|Date|Opponent)([\t,]|$)/.test(l)) || lines.slice(0, 4).join('\n');
   const tabs = (head.match(/\t/g) || []).length, commas = (head.match(/,/g) || []).length;
   if (tabs > commas) return lines.map((l) => l.split('\t')).filter((r) => r.some((x) => x.trim() !== ''));
   return fdParseCSV(text);
@@ -63,6 +63,30 @@ function attachFixtures(db, teamId, rows) {
   db.fixtures = db.fixtures || {};
   db.fixtures[teamId] = upcoming.sort((a, b) => a.date.localeCompare(b.date));
   return { played, matched, unmatched, upcoming: upcoming.length };
+}
+
+// Team "Records vs Opponents" table: one row per club played, with matches, wins, draws, losses and goals
+function fbIsRecords(rows) {
+  return rows.slice(0, 60).some((r) => { const c = r.map((x) => x.trim()); return c.includes('Opponent') && c.includes('MP') && c.includes('W') && c.includes('L') && !c.includes('Date') && !c.includes('Player'); });
+}
+function attachRecords(db, teamId, rows) {
+  const hi = rows.findIndex((r) => { const c = r.map((x) => x.trim()); return c.includes('Opponent') && c.includes('MP'); });
+  const H = rows[hi].map((x) => x.trim()), col = (n) => H.indexOf(n);
+  const i = { opp: col('Opponent'), mp: col('MP'), w: col('W'), d: col('D'), l: col('L'), gf: col('GF'), ga: col('GA'), pts: col('Pts'), xg: col('xG'), xga: col('xGA') };
+  const num = (r, k) => (i[k] >= 0 && String(r[i[k]] || '').trim() !== '' ? fbNum(r[i[k]]) : NaN);
+  const byKey = {};
+  db.teams.forEach((t) => (byKey[fbTeamKey(t.name)] = t.id));
+  const recs = [];
+  rows.slice(hi + 1).forEach((r) => {
+    const name = String(r[i.opp] || '').trim().replace(/^vs\.?\s+/i, '');
+    if (!name || name === 'Opponent' || !/\p{L}/u.test(name)) return; // repeated headers, stray lines
+    const rec = { name, oppId: byKey[fbTeamKey(name)] || null, mp: num(r, 'mp'), w: num(r, 'w'), d: num(r, 'd'), l: num(r, 'l'), gf: num(r, 'gf'), ga: num(r, 'ga'), pts: num(r, 'pts'), xg: num(r, 'xg'), xga: num(r, 'xga') };
+    if (!(rec.mp > 0)) return;
+    recs.push(rec);
+  });
+  db.records = db.records || {};
+  db.records[teamId] = recs;
+  return { clubs: recs.length, inLeague: recs.filter((r) => r.oppId).length, games: recs.reduce((s, r) => s + r.mp, 0) };
 }
 
 const FB_GROUP = { GK: 'GK', DF: 'DEF', MF: 'MID', FW: 'FWD' };
@@ -115,10 +139,11 @@ function attachFbref(db, teamId, texts) {
   db.seasonPS = db.seasonPS || {};
   const slug = (s) => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   const fields = new Set();
-  let fixtures = null;
+  let fixtures = null, records = null;
   texts.forEach((t) => {
     const rows = fbParse(t.text);
     if (!fbIsTable(rows) && fbIsFixtures(rows)) { fixtures = attachFixtures(db, teamId, rows); tables++; return; }
+    if (!fbIsTable(rows) && fbIsRecords(rows)) { records = attachRecords(db, teamId, rows); tables++; return; }
     if (!fbIsTable(rows)) { errors.push(`${t.name}: no FBref player table found (looking for a "Player" column).`); return; }
     const tab = fbReadTable(rows);
     if (!tab || !tab.players.length) { errors.push(`${t.name}: the table has no player rows.`); return; }
@@ -143,7 +168,7 @@ function attachFbref(db, teamId, texts) {
   // Drop players who did not play
   Object.keys(db.seasonPS).forEach((id) => { if (db.players[id] && db.players[id].team === teamId && !(db.seasonPS[id].min > 0)) { delete db.seasonPS[id]; delete db.players[id]; } });
   db.hasPlayers = Object.keys(db.players).length > 0;
-  return { tables, rowsRead, fields: [...fields], errors, fixtures };
+  return { tables, rowsRead, fields: [...fields], errors, fixtures, records };
 }
 
-if (typeof module !== 'undefined') module.exports = { fbParse, fbIsTable, fbIsFixtures, fbReadTable, attachFbref };
+if (typeof module !== 'undefined') module.exports = { fbParse, fbIsTable, fbIsFixtures, fbIsRecords, fbReadTable, attachFbref };

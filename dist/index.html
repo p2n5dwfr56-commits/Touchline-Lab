@@ -136,6 +136,13 @@ td .pos { color: var(--muted); font-size: 12px; margin-left: 6px; }
 .subs { margin: 4px 0 0; padding-left: 18px; font-size: 13px; }
 @media (max-width: 820px) { .board { grid-template-columns: 1fr; } }
 
+/* ---------- Opponents ---------- */
+.wdl { display: flex; gap: 1px; width: 110px; height: 12px; border-radius: 3px; overflow: hidden; background: var(--surface-2); }
+.wdl.wide { width: 100%; height: 16px; margin-top: 4px; }
+.wdl div { min-width: 0; }
+.wdl .W { background: var(--good); } .wdl .D { background: var(--muted); } .wdl .L { background: var(--bad); }
+.opp-table th.grp { text-align: center; border-bottom: 1px solid var(--rule-2); color: var(--ink-2); }
+
 /* ---------- Match timeline ---------- */
 .timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; font-size: 13.5px; }
 .timeline li { display: grid; grid-template-columns: 38px 10px 56px 1fr; gap: 8px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--rule); }
@@ -1481,7 +1488,7 @@ function fbParse(text) {
   // Pasted text may carry page navigation or a citation line above the table, so judge
   // tab- versus comma-separated from the header row itself.
   const lines = text.split(/\r?\n/);
-  const head = lines.find((l) => /(^|[\t,])(Player|Date)([\t,]|$)/.test(l)) || lines.slice(0, 4).join('\n');
+  const head = lines.find((l) => /(^|[\t,])(Player|Date|Opponent)([\t,]|$)/.test(l)) || lines.slice(0, 4).join('\n');
   const tabs = (head.match(/\t/g) || []).length, commas = (head.match(/,/g) || []).length;
   if (tabs > commas) return lines.map((l) => l.split('\t')).filter((r) => r.some((x) => x.trim() !== ''));
   return fdParseCSV(text);
@@ -1530,6 +1537,30 @@ function attachFixtures(db, teamId, rows) {
   db.fixtures = db.fixtures || {};
   db.fixtures[teamId] = upcoming.sort((a, b) => a.date.localeCompare(b.date));
   return { played, matched, unmatched, upcoming: upcoming.length };
+}
+
+// Team "Records vs Opponents" table: one row per club played, with matches, wins, draws, losses and goals
+function fbIsRecords(rows) {
+  return rows.slice(0, 60).some((r) => { const c = r.map((x) => x.trim()); return c.includes('Opponent') && c.includes('MP') && c.includes('W') && c.includes('L') && !c.includes('Date') && !c.includes('Player'); });
+}
+function attachRecords(db, teamId, rows) {
+  const hi = rows.findIndex((r) => { const c = r.map((x) => x.trim()); return c.includes('Opponent') && c.includes('MP'); });
+  const H = rows[hi].map((x) => x.trim()), col = (n) => H.indexOf(n);
+  const i = { opp: col('Opponent'), mp: col('MP'), w: col('W'), d: col('D'), l: col('L'), gf: col('GF'), ga: col('GA'), pts: col('Pts'), xg: col('xG'), xga: col('xGA') };
+  const num = (r, k) => (i[k] >= 0 && String(r[i[k]] || '').trim() !== '' ? fbNum(r[i[k]]) : NaN);
+  const byKey = {};
+  db.teams.forEach((t) => (byKey[fbTeamKey(t.name)] = t.id));
+  const recs = [];
+  rows.slice(hi + 1).forEach((r) => {
+    const name = String(r[i.opp] || '').trim().replace(/^vs\.?\s+/i, '');
+    if (!name || name === 'Opponent' || !/\p{L}/u.test(name)) return; // repeated headers, stray lines
+    const rec = { name, oppId: byKey[fbTeamKey(name)] || null, mp: num(r, 'mp'), w: num(r, 'w'), d: num(r, 'd'), l: num(r, 'l'), gf: num(r, 'gf'), ga: num(r, 'ga'), pts: num(r, 'pts'), xg: num(r, 'xg'), xga: num(r, 'xga') };
+    if (!(rec.mp > 0)) return;
+    recs.push(rec);
+  });
+  db.records = db.records || {};
+  db.records[teamId] = recs;
+  return { clubs: recs.length, inLeague: recs.filter((r) => r.oppId).length, games: recs.reduce((s, r) => s + r.mp, 0) };
 }
 
 const FB_GROUP = { GK: 'GK', DF: 'DEF', MF: 'MID', FW: 'FWD' };
@@ -1582,10 +1613,11 @@ function attachFbref(db, teamId, texts) {
   db.seasonPS = db.seasonPS || {};
   const slug = (s) => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   const fields = new Set();
-  let fixtures = null;
+  let fixtures = null, records = null;
   texts.forEach((t) => {
     const rows = fbParse(t.text);
     if (!fbIsTable(rows) && fbIsFixtures(rows)) { fixtures = attachFixtures(db, teamId, rows); tables++; return; }
+    if (!fbIsTable(rows) && fbIsRecords(rows)) { records = attachRecords(db, teamId, rows); tables++; return; }
     if (!fbIsTable(rows)) { errors.push(`${t.name}: no FBref player table found (looking for a "Player" column).`); return; }
     const tab = fbReadTable(rows);
     if (!tab || !tab.players.length) { errors.push(`${t.name}: the table has no player rows.`); return; }
@@ -1610,10 +1642,10 @@ function attachFbref(db, teamId, texts) {
   // Drop players who did not play
   Object.keys(db.seasonPS).forEach((id) => { if (db.players[id] && db.players[id].team === teamId && !(db.seasonPS[id].min > 0)) { delete db.seasonPS[id]; delete db.players[id]; } });
   db.hasPlayers = Object.keys(db.players).length > 0;
-  return { tables, rowsRead, fields: [...fields], errors, fixtures };
+  return { tables, rowsRead, fields: [...fields], errors, fixtures, records };
 }
 
-if (typeof module !== 'undefined') module.exports = { fbParse, fbIsTable, fbIsFixtures, fbReadTable, attachFbref };
+if (typeof module !== 'undefined') module.exports = { fbParse, fbIsTable, fbIsFixtures, fbIsRecords, fbReadTable, attachFbref };
 'use strict';
 /* =====================================================================
    Touchline Lab UI
@@ -1624,8 +1656,9 @@ const S = {
   tab: 'overview', team: 'ABE', venue: 'all', range: 'season', cmp: 'CEL',
   heat: 'all', shots: 'for', group: 'all', per90: true, sort: 'min', player: null,
   cmpMode: 'teams', pA: null, pB: null, match: null, act: 'pass', form: null, shape: 'plan',
+  opp: null, oppSort: 'next', oppScope: 'league',
 };
-const TABS = [['overview', 'Overview'], ['team', 'Team analysis'], ['tactics', 'Tactics'], ['players', 'Players'], ['compare', 'Compare'], ['matches', 'Matches'], ['data', 'Data']];
+const TABS = [['overview', 'Overview'], ['team', 'Team analysis'], ['tactics', 'Tactics'], ['players', 'Players'], ['compare', 'Compare'], ['opponents', 'Opponents'], ['matches', 'Matches'], ['data', 'Data']];
 
 /* ---------- DOM helpers ---------- */
 function h(tag, a, ...kids) {
@@ -2012,8 +2045,8 @@ function buildShell() {
 }
 function renderChrome() {
   chipEl.className = 'chip' + (DB.source === 'demo' ? '' : ' real');
-  chipEl.replaceChildren(h('span', { class: 'dot' }), DB.source === 'demo' ? 'Synthetic demo data' : DB.label);
-  chipEl.title = DB.source === 'demo' ? 'Generated sample season. Import real event data in the Data tab.' : '';
+  chipEl.replaceChildren(h('span', { class: 'dot' }), DB.source === 'demo' ? 'Synthetic demo data · invented players' : DB.label + (DB.snapshot ? ' · to ' + fmtDate(DB.snapshot) : ''));
+  chipEl.title = DB.source === 'demo' ? 'Generated sample season. Switch to real data in the Data tab.' : DB.snapshot ? 'Built-in snapshot. Import newer files in the Data tab to update it.' : '';
   const teamSel = h('select', { id: 'f-team', onchange: (e) => { S.team = e.target.value; if (S.cmp === S.team) S.cmp = DB.teams.find((t) => t.id !== S.team).id; if (S.range.startsWith('m:')) S.range = 'season'; S.player = null; S.match = null; S.form = null; render(); } },
     DB.teams.map((t) => h('option', { value: t.id, selected: t.id === S.team, text: t.name })));
   const ms = teamMatches(S.team);
@@ -2035,7 +2068,7 @@ function render() {
   hideTip();
   renderChrome();
   mainEl.replaceChildren();
-  const views = { overview: viewOverview, team: viewTeam, tactics: viewTactics, players: viewPlayers, compare: viewCompare, matches: viewMatches, data: viewData };
+  const views = { overview: viewOverview, team: viewTeam, tactics: viewTactics, players: viewPlayers, compare: viewCompare, opponents: viewOpponents, matches: viewMatches, data: viewData };
   (views[S.tab] || viewOverview)(mainEl);
 }
 
@@ -2645,8 +2678,9 @@ function addFbref(texts, teamId, statusEl, opts = {}) {
     parts.push(`formations, possession, attendance and referees for ${fx.matched} of ${fx.played} ${teamName(teamId)} matches` + (fx.upcoming ? `, plus ${fx.upcoming} upcoming fixtures` : ''));
     if (fx.unmatched.length) parts.push(`not matched to the loaded season (usually cup games): ${fx.unmatched.slice(0, 4).join('; ')}${fx.unmatched.length > 4 ? '…' : ''}`);
   }
-  S.team = teamId; S.player = null; S.sort = 'min'; S.per90 = true; S.form = null;
-  S.tab = r.fields.length ? 'players' : 'tactics';
+  if (r.records) parts.push(`${teamName(teamId)}’s all-time record against ${r.records.clubs} clubs (${r.records.games.toLocaleString('en-GB')} matches)`);
+  S.team = teamId; S.player = null; S.sort = 'min'; S.per90 = true; S.form = null; S.opp = null;
+  S.tab = r.fields.length ? 'players' : r.records ? 'opponents' : 'tactics';
   render();
   flash('Added ' + parts.join('. ') + '.' + (r.errors.length ? ' ' + r.errors.join(' ') : '') + ' Paste more FBref tables in the Data tab to fill in more.');
   return true;
@@ -2673,13 +2707,14 @@ function fbrefCard() {
 // opts.restore replays saved data quietly at start-up. Returns true when something was loaded.
 function importTexts(texts, statusEl, opts = {}) {
   const fail = (msg) => { if (statusEl) { statusEl.className = 'status err'; statusEl.textContent = msg; } return false; };
+  const prevSnap = DB && DB.snapshot ? DB.label : null; // replacing the built-in snapshot with a newer file for the same season
   // CSV files (football-data.co.uk) and JSON files (API-Football, StatsBomb) are told apart by content.
   const csv = [], parsed = [], fb = [];
   texts.forEach((f) => {
     const t = f.text.replace(/^﻿/, '').trimStart();
     if (t[0] === '[' || t[0] === '{') parsed.push({ name: f.name, data: JSON.parse(t) });
     else if (fdIsCSV(fdParseCSV(t))) csv.push({ name: f.name, rows: fdParseCSV(t) });
-    else if (fbIsTable(fbParse(t)) || fbIsFixtures(fbParse(t))) fb.push({ name: f.name, text: t });
+    else if (fbIsTable(fbParse(t)) || fbIsFixtures(fbParse(t)) || fbIsRecords(fbParse(t))) fb.push({ name: f.name, text: t });
   });
   if (!csv.length && !parsed.length && !fb.length) return fail('These files are not in a format Touchline Lab reads. Use a football-data.co.uk CSV, an FBref player table, the API-Football download, or StatsBomb event files.');
   if (!csv.length && !parsed.length) return addFbref(fb, S.team, statusEl, opts); // FBref tables add to the season already loaded
@@ -2705,6 +2740,7 @@ function importTexts(texts, statusEl, opts = {}) {
   // An updated file for the same season keeps the FBref tables already added to it
   const label = DB.label, thisDB = DB;
   carriedFbref(label).then(async (keep) => {
+    if (!keep.length && prevSnap === label) keep = snapshotFbref(DB); // keep the built-in FBref tables too
     if (keep.length && DB === thisDB) {
       keep.forEach((f) => { if (DB.teamById[f.team]) addFbref(f.texts, f.team, null, { restore: true }); });
       render();
@@ -2715,6 +2751,20 @@ function importTexts(texts, statusEl, opts = {}) {
     if (!ok) flash('Loaded, but this browser would not save it, so it will be gone when you reload the page.', 'err');
   });
   return true;
+}
+function showDemo() {
+  DB = DEMO; cache.clear();
+  S.team = 'ABE'; S.cmp = 'CEL'; S.range = 'season'; S.player = null; S.match = null; S.pA = S.pB = null; S.form = null; S.opp = null;
+}
+// Switch between the synthetic demo season and real data (saved imports or the built-in snapshot)
+function sourceSwitch() {
+  if (DB.source !== 'demo') {
+    return h('div', { class: 'saved' }, h('div', null, h('b', { text: 'Demo season' }), h('div', { class: 'sub', text: 'Synthetic data with pitch locations, for trying the heatmaps, shot maps and passing networks. Its players are invented.' })),
+      h('button', { class: 'btn ghost', type: 'button', text: 'Switch to demo season', onclick: () => { showDemo(); S.tab = 'overview'; render(); } }));
+  }
+  if (!STORE.meta && !SNAP) return null;
+  return h('div', { class: 'saved' }, h('div', null, h('b', { text: 'Real data' }), h('div', { class: 'sub', text: STORE.meta ? 'Your saved imports' : `Built-in 2026/27 data to ${fmtDate(SNAP.asOf)}` })),
+    h('button', { class: 'btn', type: 'button', text: 'Back to real data', onclick: async () => { if (await loadRealData()) { S.tab = 'overview'; render(); } } }));
 }
 function savedPanel() {
   const m = STORE.meta;
@@ -2735,9 +2785,9 @@ function savedPanel() {
   btn.addEventListener('click', async () => {
     if (!armed) { armed = true; btn.textContent = 'Click again to forget it'; return; }
     await forgetSaved();
-    DB = DEMO; cache.clear(); S.team = 'ABE'; S.cmp = 'CEL'; S.range = 'season'; S.player = null; S.match = null; S.pA = S.pB = null; S.form = null;
+    if (!loadSnapshot()) showDemo();
     render();
-    flash('Saved data forgotten. Showing the demo season.');
+    flash(DB.snapshot ? `Saved data forgotten. Showing the built-in data (to ${fmtDate(DB.snapshot)}).` : 'Saved data forgotten. Showing the demo season.');
   });
   wrap.append(h('div', null, h('b', { text: 'Saved in this browser' }), h('div', { class: 'sub', text: what.join(' + ') + ' · last saved ' + when })), btn);
   return wrap;
@@ -2778,7 +2828,7 @@ function viewData(el) {
       h('li', null, h('b', { text: 'Player stats, line-ups and formations' }), ': use the API-Football download below (free plan: past seasons only). Without event locations, the pitch maps stay empty.')));
   const fdUrl = 'https://www.football-data.co.uk/mmz4281/' + seasonCode() + '/SC0.csv';
   el.append(h('div', { class: 'grid' },
-    card('Data source', DB.label, prose),
+    card('Data source', DB.label + (DB.snapshot ? ` · built-in data to ${fmtDate(DB.snapshot)}` : ''), prose, sourceSwitch()),
     fbrefCard(),
     card('This season from football-data.co.uk', 'Free, no account or key · results, team stats and odds', h('div', { class: 'prose' },
       h('ol', null,
@@ -2809,6 +2859,7 @@ function boot() {
     // Bring back the last imported season (and FBref tables) saved in this browser
     loading.textContent = 'Loading your saved data…';
     const restored = await restoreSaved();
+    if (!(restored && restored.ok)) loadSnapshot(); // no saved imports: open on the built-in real data, if this build has it
     render();
     if (restored && restored.error) flash(restored.error, 'err');
     else if (restored && STORE.meta) flash(`Restored your saved data: ${STORE.meta.label || STORE.meta.files.join(', ')}${STORE.meta.fbTables ? ` + ${STORE.meta.fbTables} FBref table${STORE.meta.fbTables > 1 ? 's' : ''}` : ''}. Manage it in the Data tab.`);
@@ -3156,6 +3207,155 @@ function againstShape(T, ms) {
 }
 'use strict';
 /* =====================================================================
+   Opponents tab: record against each club
+   This season comes from the loaded results; all-time records come from
+   FBref's "Records vs Opponents" table when it has been pasted in.
+   ===================================================================== */
+
+function seasonVs(T) {
+  // Results (including fixtures without detail) grouped by opponent
+  const out = {};
+  (DB.results || DB.matches).filter((m) => m.home === T || m.away === T).forEach((m) => {
+    const O = oppOf(m, T), r = (out[O] = out[O] || { p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, xg: 0, xga: 0, xgN: 0, matches: [] });
+    const gf = goalsFor(m, T), ga = goalsAg(m, T);
+    r.p++; r.gf += gf; r.ga += ga;
+    if (gf > ga) r.w++; else if (gf === ga) r.d++; else r.l++;
+    const s = m.ts && m.ts[T];
+    if (s && has(s.xg) && has(s.xga)) { r.xg += s.xg; r.xga += s.xga; r.xgN++; }
+    r.matches.push(m);
+  });
+  return out;
+}
+function wdlBar(w, d, l) {
+  const n = w + d + l;
+  if (!n) return h('div', { class: 'wdl empty' });
+  const seg = (v, cls, label) => {
+    const el = h('div', { class: cls, style: { width: (100 * v) / n + '%' }, tabindex: 0 });
+    hover(el, () => [{ v: v + ' ' + label, strong: true }, { v: ((100 * v) / n).toFixed(0) + '% of ' + n + ' matches' }]);
+    return el;
+  };
+  return h('div', { class: 'wdl', role: 'img', 'aria-label': `${w} wins, ${d} draws, ${l} losses` }, seg(w, 'W', w === 1 ? 'win' : 'wins'), seg(d, 'D', d === 1 ? 'draw' : 'draws'), seg(l, 'L', l === 1 ? 'loss' : 'losses'));
+}
+
+function viewOpponents(el) {
+  const T = S.team;
+  const season = seasonVs(T);
+  const recs = (DB.records && DB.records[T]) || [];
+  const today = new Date().toISOString().slice(0, 10);
+  const upcoming = ((DB.fixtures && DB.fixtures[T]) || []).filter((f) => f.date >= today);
+  const table = leagueTable(DB, null);
+  const pos = Object.fromEntries(table.map((r) => [r.team.id, r]));
+
+  // One row per opponent: league clubs, plus every club in the all-time records when asked
+  const rows = {};
+  const keyOf = (id, name) => id || 'name:' + fbTeamKey(name);
+  DB.teams.filter((t) => t.id !== T).forEach((t) => (rows[t.id] = { key: t.id, id: t.id, name: t.name }));
+  recs.forEach((r) => {
+    const k = keyOf(r.oppId, r.name);
+    if (!rows[k]) { if (S.oppScope !== 'all') return; rows[k] = { key: k, id: null, name: r.name }; }
+    rows[k].all = r;
+  });
+  Object.values(rows).forEach((r) => {
+    if (r.id) r.season = season[r.id];
+    r.next = upcoming.find((f) => (r.id ? f.oppId === r.id : fbTeamKey(f.opp) === fbTeamKey(r.name)));
+  });
+  let list = Object.values(rows);
+  const pct = (r) => { const a = r.all || null, s = r.season; if (a && a.mp) return (a.w + a.d / 2) / a.mp; if (s && s.p) return (s.w + s.d / 2) / s.p; return -1; };
+  const sorts = {
+    next: (a, b) => (a.next ? a.next.date : '9999').localeCompare(b.next ? b.next.date : '9999') || a.name.localeCompare(b.name),
+    name: (a, b) => a.name.localeCompare(b.name),
+    best: (a, b) => pct(b) - pct(a) || a.name.localeCompare(b.name),
+    worst: (a, b) => pct(a) - pct(b) || a.name.localeCompare(b.name),
+    played: (a, b) => ((b.all && b.all.mp) || 0) - ((a.all && a.all.mp) || 0) || a.name.localeCompare(b.name),
+  };
+  list.sort(sorts[S.oppSort] || sorts.next);
+
+  if (!S.opp || !rows[S.opp]) S.opp = (list.find((r) => r.next) || list[0] || {}).key || null;
+  el.append(h('div', { class: 'hero' }, h('h1', { text: teamName(T) }), h('div', { class: 'meta' }, h('span', { text: 'Record against each opponent' }))));
+  const grid = h('div', { class: 'grid' });
+  el.append(grid);
+  if (S.opp) grid.append(matchupCard(T, rows[S.opp], pos));
+
+  // The table
+  const hasAll = recs.length > 0, hasXg = Object.values(season).some((s) => s.xgN);
+  const tools = h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
+    seg([['next', 'Next up'], ['best', 'Best record'], ['worst', 'Worst record'], ['name', 'A–Z']].concat(hasAll ? [['played', 'Most played']] : []), S.oppSort, (v) => { S.oppSort = v; render(); }, 'Sort'),
+    hasAll ? seg([['league', 'League clubs'], ['all', 'All clubs']], S.oppScope, (v) => { S.oppScope = v; render(); }, 'Clubs') : null);
+  const th = (t, cls, title) => h('th', { class: cls || '', title: title || null, text: t });
+  const t = h('table', { class: 'opp-table' },
+    h('thead', null,
+      h('tr', null, th('', 'l'), h('th', { colspan: hasXg ? 6 : 5, class: 'grp', text: 'This season' }), hasAll ? h('th', { colspan: 6, class: 'grp', text: 'All-time' }) : null, th('')),
+      h('tr', null, th('Opponent', 'l'), th('P'), th('W-D-L'), th('GF-GA'), th('Pts'), hasXg ? th('xGD', '', 'xG for minus xG against') : null, th('Pos', '', 'Opponent’s league position'),
+        hasAll ? [th('P'), th('W'), th('D'), th('L'), th('Win %', '', 'Wins as a share of matches played'), th('Record', 'l')] : null, th('Next', 'l'))),
+    h('tbody', null, list.map((r) => {
+      const s = r.season, a = r.all, p = r.id && pos[r.id];
+      return h('tr', { class: r.key === S.opp ? 'focus' : '', onclick: () => { S.opp = r.key; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); } },
+        h('td', { class: 'l' }, r.name),
+        h('td', { text: s ? s.p : '–' }), h('td', { text: s ? `${s.w}-${s.d}-${s.l}` : '–' }), h('td', { text: s ? `${s.gf}-${s.ga}` : '–' }), h('td', { text: s ? 3 * s.w + s.d : '–' }),
+        hasXg ? h('td', { text: s && s.xgN ? signed(s.xg - s.xga) : '–' }) : null,
+        h('td', { class: 'sub', text: p ? ordinal(p.pos) : '' }),
+        hasAll ? (a ? [h('td', { text: a.mp }), h('td', { text: fmt(a.w, 0) }), h('td', { text: fmt(a.d, 0) }), h('td', { text: fmt(a.l, 0) }), h('td', { text: has(a.w) ? ((100 * a.w) / a.mp).toFixed(0) + '%' : '–' }), h('td', { class: 'l' }, wdlBar(a.w || 0, a.d || 0, a.l || 0))] : [h('td', { text: '–' }), h('td'), h('td'), h('td'), h('td'), h('td')]) : null,
+        h('td', { class: 'l sub', text: r.next ? fmtDate(r.next.date) + ' · ' + (r.next.home ? 'H' : 'A') : '' }));
+    })));
+  grid.append(card({ title: 'Head-to-head records', span: true, tools }, `${teamName(T)} against every ${S.oppScope === 'all' ? 'club played' : 'club in this league'} · click a row for the full matchup`,
+    h('div', { class: 'tbl-wrap' }, t),
+    legend([['Win', css('--good')], ['Draw', css('--muted')], ['Loss', css('--bad')]]),
+    hasAll ? h('p', { class: 'note', text: 'All-time figures: FBref.com. This season: ' + DB.label + '.' }) : recordsHint(T)));
+}
+
+function recordsHint(T) {
+  if (DB.source === 'demo') return h('p', { class: 'note', text: 'This is the synthetic demo season. Load a real season and paste FBref’s Records vs Opponents table in the Data tab to see all-time head-to-head records.' });
+  const p = h('p', { class: 'note' }, 'For all-time records, open the team’s ',
+    h('a', { href: 'https://fbref.com/en/squads/8bbab7cf/history/vs_opp/Aberdeen-Records-vs-Opponents', target: '_blank', rel: 'noopener', text: 'Records vs Opponents page on FBref' }),
+    ', use Share & Export → Get table as CSV, and paste it into the FBref box in the Data tab with ' + teamName(T) + ' selected.');
+  return p;
+}
+
+function matchupCard(T, r, pos) {
+  const A = css('--team-a'), B = css('--team-b');
+  const s = r.season, a = r.all, p = r.id && pos[r.id];
+  const wrap = h('div', { class: 'grid three' });
+  // Next meeting and current form
+  const next = h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '6px' }, text: 'Next meeting' }));
+  if (r.next) {
+    next.append(h('div', { class: 'statline' },
+      h('div', null, h('b', { text: fmtDate(r.next.date) }), h('span', { text: (r.next.time ? r.next.time + ' · ' : '') + (r.next.home ? 'Home' : 'Away') })),
+      h('div', null, h('b', { text: r.next.comp || '–' }), h('span', { text: 'Competition' }))));
+  } else next.append(h('p', { class: 'sub', style: { marginTop: 0 }, text: DB.fixtures && DB.fixtures[T] ? 'No more meetings in the fixture list.' : 'Paste FBref’s Scores & Fixtures table in the Data tab to see upcoming meetings.' }));
+  if (p) {
+    const form = (DB.results || DB.matches).filter((m) => m.home === r.id || m.away === r.id).slice(-5).map((m) => result(m, r.id));
+    next.append(h('div', { class: 'eyebrow', style: { margin: '10px 0 6px' }, text: r.name + ' now' }),
+      h('div', { class: 'meta', style: { display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' } },
+        h('span', { text: `${ordinal(p.pos)} · ${p.a.pts} pts` }), h('span', { class: 'form', 'aria-label': 'Last five results' }, form.map((x) => h('span', { class: x, text: x })))));
+    next.append(h('div', { style: { marginTop: '12px' } }, h('button', { class: 'btn ghost', type: 'button', text: `Compare ${teamName(T)} and ${r.name}`, onclick: () => { S.cmp = r.id; S.cmpMode = 'teams'; S.tab = 'compare'; render(); window.scrollTo({ top: 0 }); } })));
+  }
+  wrap.append(next);
+
+  // This season's meetings
+  const ms = s ? s.matches : [];
+  wrap.append(h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '6px' }, text: 'This season' + (s ? ` · ${s.w}W ${s.d}D ${s.l}L` : '') }),
+    ms.length ? h('div', { class: 'mlist' }, ms.map((m) => {
+      const res = result(m, T), st = m.ts && m.ts[T];
+      return h('button', { type: 'button', class: 'mrow', onclick: () => { S.tab = 'matches'; S.match = m.id; render(); window.scrollTo({ top: 0 }); }, title: 'Open the match report' },
+        h('span', { class: 'd', text: fmtDate(m.date) }), h('span', { class: 'res ' + res, text: res }), h('span', null, m.home === T ? 'Home' : 'Away'),
+        h('span', { class: 'score', text: goalsFor(m, T) + '–' + goalsAg(m, T) }), h('span', { class: 'xg', text: st && has(st.xg) ? st.xg.toFixed(1) + ' – ' + st.xga.toFixed(1) + ' xG' : '' }));
+    })) : h('p', { class: 'sub', style: { marginTop: 0 }, text: r.id ? 'Not played yet this season.' : 'Not in this season’s league.' })));
+
+  // All-time
+  const all = h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '6px' }, text: 'All-time' }));
+  if (a) {
+    const bar = wdlBar(a.w || 0, a.d || 0, a.l || 0);
+    bar.classList.add('wide');
+    all.append(h('div', { class: 'statline' }, [[a.mp, 'Played'], [fmt(a.w, 0), 'Won'], [fmt(a.d, 0), 'Drawn'], [fmt(a.l, 0), 'Lost']].concat(has(a.gf) ? [[`${a.gf}–${a.ga}`, 'Goals']] : []).map(([v, l]) => h('div', null, h('b', { text: v }), h('span', { text: l })))),
+      bar,
+      h('p', { class: 'note', text: has(a.w) ? `${teamName(T)} win ${((100 * a.w) / a.mp).toFixed(0)}% of meetings and lose ${((100 * a.l) / a.mp).toFixed(0)}%.` : '' }));
+  } else all.append(h('p', { class: 'sub', style: { marginTop: 0 }, text: (DB.records && DB.records[T]) ? 'No all-time record for this club in the FBref table.' : 'Paste FBref’s Records vs Opponents table in the Data tab to see the all-time record.' }));
+  wrap.append(all);
+
+  return card({ title: `${teamName(T)} v ${r.name}`, span: true }, p ? `${r.name} are ${ordinal(p.pos)} in the league` : 'Head-to-head', wrap);
+}
+'use strict';
+/* =====================================================================
    Saved imports
    Keeps the files and FBref tables you import in this browser's own
    storage (IndexedDB), and replays them when the app opens. Nothing is
@@ -3219,7 +3419,9 @@ async function savePrimary(texts, label, fbref) {
   return ok;
 }
 async function saveFbref(teamId, teamNameText, texts) {
-  const log = await storeGet('log');
+  let log = await storeGet('log');
+  // On top of the built-in snapshot: save the snapshot as the base, so the new table survives a reload
+  if (!log && DB.snapshot && SNAP) log = { v: 1, savedAt: Date.now(), label: DB.label, primary: SNAP.primary, fbref: snapshotFbref(DB) };
   if (!log) return false; // FBref tables only make sense on top of a saved season
   texts.forEach((t) => {
     if (log.fbref.some((f) => f.team === teamId && f.texts.some((x) => x.text === t.text))) return; // same table pasted again
@@ -3233,6 +3435,26 @@ async function saveFbref(teamId, teamNameText, texts) {
 async function forgetSaved() {
   await storeSet('log', null);
   STORE.meta = null;
+}
+
+/* Built-in snapshot of real data (present only in builds made with --with-snapshot). */
+const SNAP = typeof SNAPSHOT !== 'undefined' ? SNAPSHOT : null;
+function snapshotFbref(db) {
+  if (!SNAP) return [];
+  return SNAP.fbref.map((f) => { const t = db.teams.find((x) => x.name === f.team); return t ? { team: t.id, teamName: t.name, texts: f.texts } : null; }).filter(Boolean);
+}
+function loadSnapshot() {
+  if (!SNAP) return false;
+  if (!importTexts(SNAP.primary, null, { restore: true })) return false;
+  snapshotFbref(DB).forEach((f) => addFbref(f.texts, f.team, null, { restore: true }));
+  DB.snapshot = SNAP.asOf;
+  return true;
+}
+// Back to real data: the viewer's saved imports if any, else the built-in snapshot
+async function loadRealData() {
+  const r = STORE.meta ? await restoreSaved() : null;
+  if (r && r.ok) return true;
+  return loadSnapshot();
 }
 
 /* On open: rebuild the last session from the saved log. Returns a message, or null if nothing was saved. */
