@@ -30,6 +30,7 @@ belongs to that browser on that device.
 - `src/assessment.js` – Key players tab: position-based player ratings, squad leaders, season improvement
 - `src/seasons.js` – past seasons: season picker, Seasons tab (season by season, points race, players across seasons)
 - `src/opponents.js` – Opponents tab: record against each club, this season and all-time
+- `src/matchday.js` – Matchday tab: live ground food and drink prices kept in the artifact's shared store
 - `src/ask.js` – Ask AI tab: a prompt box that asks Claude for a custom table or chart from the loaded data
 - `src/store.js` – saves imports in the browser and restores them on open; built-in snapshot
 - `tools/embed-snapshot.mjs` – used by `build.sh --with-snapshot`
@@ -215,3 +216,11 @@ account. Event data is shown for the visit and not saved.
 - **Home attendances** (Seasons tab): a line per club by season. Paste FBref's League Table for a season,
   or the Attendances table copied from that season's Wikipedia article, into the FBref box; a table with no
   season in it is filed under the season picked at the top.
+
+## Matchday prices
+The **Matchday** tab shows the ground's food and drink prices. They live in the published artifact's
+shared store (`db` capability: `matchday/menu` for the list, `matchday/history` for dated price
+changes), not in the page, so they stay current across republishes: the owner and editors change them
+from the page (Edit prices), everyone else reads them. Outside claude.ai the tab says the list is kept
+there. Aberdeen's 2026 prices were entered from the club's published menu; tick "Checked against the
+club's own published menu" once confirmed on afc.co.uk.

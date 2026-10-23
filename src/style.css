@@ -316,3 +316,11 @@ textarea { width: 100%; font-family: var(--font-mono); font-size: 12px; line-hei
 .ask-bar-v { font-variant-numeric: tabular-nums; color: var(--ink-2); white-space: nowrap; }
 .ask-bar.on .ask-bar-l { font-weight: 700; }
 .ask-bar.on { background: var(--surface-2); border-radius: 4px; }
+
+/* Matchday */
+.md-cats { display: grid; gap: 18px 28px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.md-table { width: 100%; }
+.md-table td { padding: 6px 4px; }
+.md-table td:last-child { text-align: right; white-space: nowrap; }
+.md-edit input[type="text"], .md-edit select { font: inherit; padding: 5px 8px; border: 1px solid var(--rule-2); border-radius: 4px; background: var(--surface); color: var(--ink); width: 100%; min-width: 0; }
+.md-edit td { padding: 4px; }
