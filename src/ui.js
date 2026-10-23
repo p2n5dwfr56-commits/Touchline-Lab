@@ -48,6 +48,8 @@ function rgbOf(col) {
   return m ? m.slice(0, 3).map(Number) : [128, 128, 128];
 }
 const fmt = (v, d = 1) => (v == null || !isFinite(v) ? '–' : v.toFixed(d));
+// Signed difference; values that round to zero show as plain 0.0 rather than -0.0
+const signed = (v, d = 1) => { const s = fmt(v, d); return s === '–' ? s : Number(s) === 0 ? (0).toFixed(d) : (v > 0 ? '+' : '') + s; };
 const teamName = (id) => (DB.teamById[id] ? DB.teamById[id].name : id);
 const ordinal = (n) => n + (n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th');
 const fmtDate = (d) => (d ? new Date(d + 'T12:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '');
@@ -454,8 +456,8 @@ function viewOverview(el) {
       return h('tr', { class: r.team.id === T ? 'focus' : '', onclick: () => { S.team = r.team.id; if (S.cmp === S.team) S.cmp = T; S.range = 'season'; render(); }, title: 'Show ' + r.team.name },
         h('td', { text: r.pos }), h('td', { class: 'l', text: r.team.name }), h('td', { text: t.n }), h('td', { text: t.w }), h('td', { text: t.d }), h('td', { text: t.l }),
         h('td', { text: t.g }), h('td', { text: t.ga }), h('td', { text: (t.g - t.ga > 0 ? '+' : '') + (t.g - t.ga) }), h('td', null, h('b', { text: t.pts })),
-        showXg ? [h('td', { text: fmt(t.xg, 1) }), h('td', { text: fmt(t.xga, 1) }), h('td', { text: (t.xg - t.xga > 0 ? '+' : '') + fmt(t.xg - t.xga, 1) })] : null,
-        showMkt ? [h('td', { text: fmt(t.mxp, 1) }), h('td', { text: (t.pts - t.mxp > 0 ? '+' : '') + fmt(t.pts - t.mxp, 1) })] : null);
+        showXg ? [h('td', { text: fmt(t.xg, 1) }), h('td', { text: fmt(t.xga, 1) }), h('td', { text: signed(t.xg - t.xga) })] : null,
+        showMkt ? [h('td', { text: fmt(t.mxp, 1) }), h('td', { text: signed(t.pts - t.mxp) })] : null);
     })));
   grid.append(card('League table', 'All matches · click a row to switch team', h('div', { class: 'tbl-wrap' }, lt)));
 
@@ -1033,8 +1035,8 @@ function viewData(el) {
       h('ol', null,
         h('li', null, 'Download this season’s Scottish Premiership file: ', h('a', { href: fdUrl, target: '_blank', rel: 'noopener', text: fdUrl.replace('https://www.', '') }), '. If the link does not work, go to ', h('a', { href: 'https://www.football-data.co.uk/scotlandm.php', target: '_blank', rel: 'noopener', text: 'football-data.co.uk/scotlandm.php' }), ' and click Premiership for the season you want.'),
         h('li', null, 'Drop the downloaded ', h('code', { text: 'SC0.csv' }), ' into the import box.')),
-      h('p', null, 'You get the league table, form, results, shots, shots on target, corners, fouls and cards per match, plus pre-match odds. The app turns the odds into expected points, so you can see which teams are doing better or worse than the market expected.'),
-      h('p', null, 'There are no player stats, line-ups or xG in this file. The site keeps it updated through the season, so download it again for the latest results.'))),
+      h('p', null, 'You get the league table, form, results, xG, shots, shots on target, corners, fouls and cards per match, plus pre-match odds. The app turns the odds into expected points, so you can see which teams are doing better or worse than the market expected.'),
+      h('p', null, 'There are no player stats or line-ups in this file, and older seasons have no xG. The site keeps it updated through the season, so download it again for the latest results.'))),
     card('Import data', 'football-data.co.uk, API-Football or StatsBomb files · they stay in your browser, nothing is uploaded', drop, status,
       DB.source !== 'demo' ? h('div', { style: { marginTop: '12px' } }, h('button', { class: 'btn ghost', type: 'button', onclick: () => { DB = DEMO; cache.clear(); S.team = 'ABE'; S.cmp = 'CEL'; S.range = 'season'; S.player = null; S.match = null; S.pA = S.pB = null; render(); }, text: 'Back to demo season' })) : null,
       h('p', { class: 'note', text: 'StatsBomb tip: in the open-data repository, events live in data/events/ and fixtures in data/matches/<competition_id>/<season_id>.json. Load several matches from one competition to unlock league tables and rankings.' })),

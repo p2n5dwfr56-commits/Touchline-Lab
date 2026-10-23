@@ -3,7 +3,7 @@
    football-data.co.uk import
    One CSV per league season, e.g. https://www.football-data.co.uk/mmz4281/2627/SC0.csv
    (Scottish Premiership 2026/27). Gives results, team match stats where the
-   file has them (shots, shots on target, corners, fouls, cards) and
+   file has them (xG, shots, shots on target, corners, fouls, cards) and
    bookmaker odds. No players, line-ups or pitch locations.
    ===================================================================== */
 
@@ -58,7 +58,7 @@ function importFootballData(csvFiles) {
     const iH = pick('HomeTeam', 'Home'), iA = pick('AwayTeam', 'Away'), iHG = pick('FTHG', 'HG'), iAG = pick('FTAG', 'AG');
     const iDiv = col('Div'), iDate = col('Date'), iLeague = col('League'), iSeason = col('Season');
     const odds = FD_ODDS.map((cols) => cols.map(col)).find((c) => c.every((i) => i >= 0));
-    const stat = { HS: col('HS'), AS: col('AS'), HST: col('HST'), AST: col('AST'), HC: col('HC'), AC: col('AC'), HF: col('HF'), AF: col('AF'), HY: col('HY'), AY: col('AY'), HR: col('HR'), AR: col('AR') };
+    const stat = { HxG: col('HxG'), AxG: col('AxG'), HS: col('HS'), AS: col('AS'), HST: col('HST'), AST: col('AST'), HC: col('HC'), AC: col('AC'), HF: col('HF'), AF: col('AF'), HY: col('HY'), AY: col('AY'), HR: col('HR'), AR: col('AR') };
     f.rows.slice(1).forEach((r) => {
       const home = (r[iH] || '').trim(), away = (r[iA] || '').trim();
       const hg = parseInt(r[iHG], 10), ag = parseInt(r[iAG], 10);
@@ -99,6 +99,7 @@ function importFootballData(csvFiles) {
       s.w = s.g > s.ga ? 1 : 0; s.d = s.g === s.ga ? 1 : 0; s.l = s.g < s.ga ? 1 : 0; s.pts = 3 * s.w + s.d;
       s.sh = num(x.stat[me + 'S']); s.sha = num(x.stat[op + 'S']); s.sot = num(x.stat[me + 'ST']);
       s.cor = num(x.stat[me + 'C']); s.fls = num(x.stat[me + 'F']); s.yc = num(x.stat[me + 'Y']);
+      s.xg = num(x.stat[me + 'xG']); s.xga = num(x.stat[op + 'xG']); // xG columns appear in recent seasons only
       s.mxp = T === H ? 3 * pH + pD : 3 * pA + pD;
       ts[T] = s;
     });
