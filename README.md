@@ -19,6 +19,7 @@ belongs to that browser on that device.
 ## Layout
 - `src/engine.js` – data model, demo-season simulator, StatsBomb importer, all metrics
 - `src/afcup.js` – API-Football cup files (League Cup, Scottish Cup) added to the league season with full detail
+- `src/wyscout.js` – Wyscout (Hudl) API v3 match events: positions, xG, line-ups, formations, substitutions
 - `src/ui.js` – views and charts (plain JS + SVG, no libraries)
 - `src/tactics.js` – Tactics tab: formations, tactical line-up board, shape numbers
 - `src/apifootball.js` – API-Football importer (match/player stats, line-ups, formations)
@@ -35,6 +36,7 @@ belongs to that browser on that device.
 - `tools/fetch-api-football.mjs` – downloads a season from API-Football into one file
 - `tools/fetch-sportmonks.mjs` – downloads a Sportmonks season into one file
 - `tools/fetch-statsbomb.mjs` – downloads StatsBomb Open Data matches (events + 360) into one file
+- `tools/fetch-wyscout.mjs` – downloads a Wyscout season (API credentials) or converts match files into one file
 - `src/style.css`, `src/head.html` – styling and page head
 
 ## Data
@@ -184,3 +186,21 @@ one metric for every team, a team's matches, player totals with sorting, one pla
 the filters on screen, and answers with a small JSON object (summary, table, chart) that the page renders.
 The prompt tells it to use only numbers the tools return. Answers are kept in the viewer's browser; tables
 copy as CSV. Opened anywhere else, the tab says it is unavailable and the rest of the app works as before.
+
+## Wyscout
+Wyscout (Hudl) covers the Scottish Premiership with full event data: every pass, shot, duel, carry and
+interception with its pitch position, Wyscout's xG on each shot, line-ups, formations and substitutions.
+It needs a Wyscout API subscription (the platform's Excel exports are season stats, not events).
+
+```sh
+WYSCOUT_USER=you WYSCOUT_PASS=secret node tools/fetch-wyscout.mjs --find "Premiership"
+WYSCOUT_USER=you WYSCOUT_PASS=secret node tools/fetch-wyscout.mjs --competition <id> --list-seasons
+WYSCOUT_USER=you WYSCOUT_PASS=secret node tools/fetch-wyscout.mjs --season <id> --team Aberdeen
+node tools/fetch-wyscout.mjs --convert <folder of match files> --out wyscout.json   # files you already have
+```
+
+Drop the output, or raw `/v3/matches/{id}/events?fetch=teams,players,match,substitutions,formations`
+responses, into the Data tab. Wyscout's 0–100 coordinates (each team attacking left to right, y = 0 on its
+left) are scaled onto the 120 × 80 pitch, so every pitch view works. The importer was built and checked
+against kloppy's public Wyscout v3 test match; the downloader's API calls have not been run against a live
+account. Event data is shown for the visit and not saved.

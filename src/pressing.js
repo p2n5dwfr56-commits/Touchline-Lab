@@ -319,7 +319,7 @@ let SAMPLE_DB = null;
 function eventsDB(b) {
   const db = prepareDB(JSON.parse(JSON.stringify(b.db)));
   db.source = 'sample';
-  db.label = 'StatsBomb · ' + b.label;
+  db.label = (/wyscout/i.test(b.attribution || '') ? 'Wyscout · ' : 'StatsBomb · ') + b.label;
   return db;
 }
 function loadSample() {

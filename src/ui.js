@@ -384,7 +384,7 @@ function lineChart(box, { series, labels, tipFor, yFmt = (v) => v.toFixed(1), he
 }
 
 function legend(items) {
-  return h('div', { class: 'legend' }, items.map(([label, color, kind]) => h('span', null, h('i', { class: kind || '', style: { background: kind === 'line-dash' ? `repeating-linear-gradient(90deg, ${color} 0 5px, transparent 5px 8px)` : color } }), label)));
+  return h('div', { class: 'legend' }, items.map(([label, color, kind]) => h('span', null, h('i', { class: kind || '', style: { background: /\bline-dash\b/.test(kind || '') ? `repeating-linear-gradient(90deg, ${color} 0 5px, transparent 5px 8px)` : color } }), label)));
 }
 
 const PHASE_COLORS = { bu: '--c1', pr: '--c3', f3: '--c2', tr: '--c5', sp: '--c4' };
@@ -1276,7 +1276,7 @@ function importTexts(texts, statusEl, opts = {}) {
     S.range = 'season'; S.player = null; S.match = null; S.pA = S.pB = null; S.form = null; S.opp = null; S.loss = null; S.comp = 'league';
     S.tab = 'press';
     render();
-    flash(`Loaded ${evb[0].label}: ${DB.matches.length} matches with every event${evb[0].with360 ? ` (${evb[0].with360} with 360 player positions)` : ''}. Event files are not saved in the browser, so your saved data comes back when you reload. Data: ${evb[0].attribution}.`);
+    flash(`Loaded ${evb[0].label}: ${DB.matches.length} match${DB.matches.length === 1 ? '' : 'es'} with every event${evb[0].with360 ? ` (${evb[0].with360} with 360 player positions)` : ''}. Event files are not saved in the browser, so your saved data comes back when you reload. Data: ${evb[0].attribution}.`);
     return true;
   }
   if (!csv.length && !parsed.length && !fb.length && !sm.length) return fail('These files are not in a format Touchline Lab reads. Use a football-data.co.uk CSV, an FBref player table, the Sportmonks or API-Football download, or StatsBomb event files.');
@@ -1289,8 +1289,8 @@ function importTexts(texts, statusEl, opts = {}) {
   }
   // API-Football cup files (League Cup, Scottish Cup) add to the season already loaded
   if (!csv.length && parsed.length && isApiFootball(parsed) && afCupLeague(parsed)) return addAfCup(parsed, texts, statusEl, opts);
-  const kind = csv.length ? 'fd' : isApiFootball(parsed) ? 'af' : 'sb';
-  const { db, errors } = kind === 'fd' ? importFootballData(csv) : kind === 'af' ? importApiFootball(parsed) : importStatsBomb(parsed);
+  const kind = csv.length ? 'fd' : parsed.some((f) => wyIsFile(f.data)) ? 'wy' : isApiFootball(parsed) ? 'af' : 'sb';
+  const { db, errors } = kind === 'fd' ? importFootballData(csv) : kind === 'wy' ? importWyscout(parsed.filter((f) => wyIsFile(f.data))) : kind === 'af' ? importApiFootball(parsed) : importStatsBomb(parsed);
   // An older season than the current one is kept as a past season, not instead of it
   if (kind === 'fd' && !opts.restore && db.matches.length && SEASONS.real && db.season && db.season < SEASONS.real.season) {
     pastAddPrimary(db.season, texts).then(async (ok) => {
@@ -1317,8 +1317,9 @@ function importTexts(texts, statusEl, opts = {}) {
   if (sm.length) addSportmonks(sm, statusEl, { restore: true }); // dropped together with the season file
   if (opts.restore) return true;
   if (errors.length && kind === 'fd') flash(errors[0], 'err');
-  S.tab = fb.length ? 'players' : kind === 'sb' ? 'press' : 'overview';
+  S.tab = fb.length ? 'players' : kind === 'sb' || kind === 'wy' ? 'team' : 'overview';
   render();
+  if (kind === 'wy') { DB.transient = true; DB.label = `Wyscout · ${DB.teams.map((t) => t.name).slice(0, 3).join(', ')}${DB.teams.length > 3 ? '…' : ''}`; renderChrome(); flash(`Loaded ${DB.matches.length} Wyscout match${DB.matches.length === 1 ? '' : 'es'} with every event and its pitch position, line-ups and xG. Event files are not saved in the browser, so your saved data comes back when you reload. Data: Wyscout (Hudl).` + (errors.length ? ' ' + errors[0] : '')); return true; }
   if (kind === 'sb') { DB.transient = true; flash(`Loaded ${DB.matches.length} StatsBomb match${DB.matches.length === 1 ? '' : 'es'}${DB.matches.some((m) => m.events.some((e) => e.ff)) ? ' with 360 player positions' : ''}. Event files are not saved in the browser, so your saved data comes back when you reload.`); return true; }
   // An updated file for the same season keeps the FBref tables already added to it
   const label = DB.label, thisDB = DB;
@@ -1506,6 +1507,12 @@ function viewData(el) {
       h('p', null, 'There are no player stats or line-ups in this file, and older seasons have no xG. The site keeps it updated through the season, so download it again for the latest results.'))),
     card('Import data', 'football-data.co.uk, API-Football or StatsBomb files · they stay in your browser, nothing is uploaded', drop, status, savedPanel(),
       h('p', { class: 'note' }, 'StatsBomb: the quickest route is ', h('code', { text: 'node tools/fetch-statsbomb.mjs --list' }), ' then ', h('code', { text: 'node tools/fetch-statsbomb.mjs --competition 55 --season 282' }), ' (Euro 2024), which saves one file with every event and the 360 player positions; drop it here. Raw files from the open-data repository also work: events from data/events/, 360 files from data/three-sixty/ and data/matches/<competition_id>/<season_id>.json. Event data is shown for the visit and not saved, so your saved season stays.')),
+    card('Event data from Wyscout (Hudl)', 'Every pass, shot and duel with its pitch position, Wyscout xG, line-ups · needs a Wyscout API subscription', h('div', { class: 'prose' },
+      h('ol', null,
+        h('li', null, 'Wyscout covers the Scottish Premiership. Event data comes with its API (ask Hudl whether your plan includes API access and event downloads; the Wyscout platform’s Excel exports are season stats, not events).'),
+        h('li', null, 'On your computer, with Node.js 18+ and the Touchline Lab repository, find the competition and season, then download:', h('pre', { class: 'cmd', text: 'WYSCOUT_USER=you WYSCOUT_PASS=secret node tools/fetch-wyscout.mjs --find "Premiership"\nWYSCOUT_USER=you WYSCOUT_PASS=secret node tools/fetch-wyscout.mjs --competition <id> --list-seasons\nWYSCOUT_USER=you WYSCOUT_PASS=secret node tools/fetch-wyscout.mjs --season <id> --team Aberdeen' })),
+        h('li', null, 'Drop the saved ', h('code', { text: 'wyscout-<season>.json' }), ' into the import box. Match files you already have (the API’s match events with teams, players, match, substitutions and formations) can be dropped directly, or combined first with ', h('code', { text: '--convert <folder>' }), '.')),
+      h('p', null, 'Every pitch view then works for those matches: touch maps, shot maps with Wyscout’s xG, passing networks, possession phases, losses of the ball and how quickly it comes back. Like StatsBomb files, event data is shown for the visit and not saved, so your saved season stays as it is.'))),
     card('Cup matches from API-Football', 'League Cup and Scottish Cup with the same detail as league matches · paid plan for the current season', h('div', { class: 'prose' },
       h('ol', null,
         h('li', null, 'On your own computer (API-Football flags downloads from shared cloud servers), with Node.js 18+ and the Touchline Lab repository, run:', h('pre', { class: 'cmd', text: 'API_FOOTBALL_KEY=your_key node tools/fetch-api-football.mjs --league 185 --season 2026' }), '185 is the Scottish League Cup and 181 the Scottish Cup; the season is the starting year (2026 = 2026/27).'),
