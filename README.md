@@ -13,6 +13,7 @@ After editing anything in `src/`, run `./build.sh` to rebuild `dist/index.html`.
 - `src/tactics.js` – Tactics tab: formations, tactical line-up board, shape numbers
 - `src/apifootball.js` – API-Football importer (match/player stats, line-ups, formations)
 - `src/footballdata.js` – football-data.co.uk CSV importer (results, team match stats, odds)
+- `src/fbref.js` – FBref player table importer (season totals per player)
 - `tools/fetch-api-football.mjs` – downloads a season from API-Football into one file
 - `src/style.css`, `src/head.html` – styling and page head
 
@@ -25,6 +26,14 @@ Scottish Premiership file for 2026/27 is https://www.football-data.co.uk/mmz4281
 (the folder is the two season years, e.g. 2526 for 2025/26). Download it in a browser and drop it
 in. The odds become "market expected points", shown next to actual points in the league table.
 No players, line-ups or pitch locations, so Players, Tactics and the pitch maps stay empty.
+
+**FBref player tables** (season totals per player). Add them on top of a loaded season: on a squad
+page (e.g. https://fbref.com/en/squads/8bbab7cf/Aberdeen-Stats) use Share & Export > Get table as
+CSV, or copy the table itself, and paste it into the Data tab's FBref box (or drop a saved .csv).
+Standard Stats gives minutes, goals, assists, xG, xAG and progressive passes/carries; Shooting,
+Passing, Defensive Actions, Possession and Miscellaneous fill in more columns. Columns are matched
+by name, so FBref layout changes are tolerated. Add several teams to get league-wide percentiles.
+FBref blocks automated downloads, so this is copy-and-paste by design.
 
 **StatsBomb event data** (every pass, shot and tackle with pitch coordinates, 120 x 80 yards,
 each team attacking left to right). Drives every view, including heatmaps and passing networks.

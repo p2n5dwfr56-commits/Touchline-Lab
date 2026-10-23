@@ -715,7 +715,14 @@ function addInto(a, b) {
   return a;
 }
 function aggTeam(matches, T) { const a = blankTeam(); a.n = 0; matches.forEach((m) => m.ts[T] && addInto(a, m.ts[T])); return a; }
-function aggPlayer(matches, pid) { const a = blankPlayer(); matches.forEach((m) => m.ps[pid] && addInto(a, m.ps[pid])); return a; }
+function aggPlayer(matches, pid) {
+  // Season totals (e.g. from FBref) stand in for players with no per-match stats; they ignore the match range.
+  if (aggPlayer.season && aggPlayer.season[pid]) return { ...aggPlayer.season[pid] };
+  const a = blankPlayer();
+  matches.forEach((m) => m.ps[pid] && addInto(a, m.ps[pid]));
+  return a;
+}
+aggPlayer.season = null;
 
 // NaN marks a stat the data source does not provide; it propagates so the UI can hide it.
 const safe = (a, b) => (Number.isNaN(a) || Number.isNaN(b) ? NaN : b ? a / b : 0);

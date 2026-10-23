@@ -138,7 +138,8 @@ function eventsNote(title, items) {
 }
 function missingNote(title, what, el) {
   el.append(h('div', { class: 'hero' }, h('h1', { text: teamName(S.team) })));
-  el.append(card({ title, span: true }, null, h('p', { class: 'note', style: { marginTop: 0 }, text: `${what} are not in this data. ${DB.label} has ${dataHas()}. API-Football or StatsBomb files from the Data tab include them.` })));
+  const where = /^Player stats/.test(what) ?'Add them from FBref in the Data tab (paste a squad table), or load API-Football or StatsBomb files.' : 'API-Football or StatsBomb files from the Data tab include them.';
+  el.append(card({ title, span: true }, null, h('p', { class: 'note', style: { marginTop: 0 }, text: `${what} are not in this data. ${DB.label} has ${dataHas()}. ${where}` })));
 }
 
 /* ---------- Pitch ---------- */
@@ -412,6 +413,7 @@ function renderChrome() {
   tabsEl.replaceChildren(...TABS.map(([k, l]) => h('button', { role: 'tab', 'aria-selected': String(S.tab === k), onclick: () => { S.tab = k; try { history.replaceState(null, '', '#' + k); } catch (e) {} render(); window.scrollTo({ top: 0 }); }, text: l })));
 }
 function render() {
+  aggPlayer.season = DB.seasonPS || null; // FBref season totals, when loaded
   hideTip();
   renderChrome();
   mainEl.replaceChildren();
@@ -626,6 +628,7 @@ function viewPlayers(el) {
   if (!DB.hasPlayers) return missingNote('Players', 'Player stats', el);
   const T = S.team, ms = scoped(T);
   let rows = Object.values(DB.players).filter((p) => p.team === T).map((p) => ({ p, a: aggPlayer(ms, p.id) })).filter((r) => r.a.min > 0);
+  if (!rows.length) return missingNote('Players', `Player stats for ${teamName(T)}`, el);
   if (S.group !== 'all') rows = rows.filter((r) => r.p.group === S.group);
   const cols = PCOLS.filter((c) => rows.some((r) => has(c[2](r.a))));
   const sc = cols.find((c) => c[0] === S.sort) || cols[0];
@@ -643,7 +646,8 @@ function viewPlayers(el) {
     h('tbody', null, rows.map((r) => h('tr', { class: r.p.id === S.player ? 'focus' : '', onclick: () => { S.player = r.p.id; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); } },
       h('td', { class: 'l' }, h('span', { class: 'badge', text: r.p.role || r.p.group }), r.p.name),
       cols.map((c) => h('td', { text: fmt(colVal(c, r.a), c[0] === 'min' || c[3] === 0 ? 0 : c[0] === 'rating' || S.per90 ? 2 : c[0] === 'xg' || c[0] === 'xa' ? 1 : 0) }))))));
-  el.append(card({ title: 'Squad', tools }, `${teamName(T)} · ${rangeLabel()} · ${S.per90 ? 'per 90 minutes' : 'totals'} · click a column to sort, a row to open the player`, h('div', { class: 'tbl-wrap' }, t)));
+  const fbOnly = DB.seasonPS && rows.some((r) => DB.seasonPS[r.p.id]);
+  el.append(card({ title: 'Squad', tools }, `${teamName(T)} · ${fbOnly ? 'season totals from FBref' : rangeLabel()} · ${S.per90 ? 'per 90 minutes' : 'totals'} · click a column to sort, a row to open the player`, h('div', { class: 'tbl-wrap' }, t)));
 }
 function peerPool(group) {
   return memo('peer|' + group + '|' + S.venue + '|' + leagueRange(), () => {
@@ -686,6 +690,7 @@ function pctBars(players, colors) {
   const avail = (k) => { const mt = PLAYER_METRICS.find((m) => m.k === k); return pool.some((x) => has(playerValue(mt, x.a, true))); };
   let keys = (PROFILE_METRICS[group] || PROFILE_METRICS.MID).filter(avail);
   if (keys.length < 6) keys = keys.concat(STATS_PROFILE[group].filter((k) => avail(k) && !keys.includes(k)));
+  if (pool.length < 3) return h('p', { class: 'note', style: { marginTop: 0 }, text: `Percentiles need at least 3 ${GROUP_NAME[group].toLowerCase()}s with enough minutes to compare against. Add FBref tables for more teams to rank players across the league.` });
   return h('div', { class: 'pct' }, keys.map((k) => {
     const mt = PLAYER_METRICS.find((m) => m.k === k);
     return h('div', { class: 'pct-row' }, h('div', { class: 'nm', text: mt.l + (mt.p90 ? ' /90' : '') }),
@@ -729,9 +734,12 @@ function playerProfile(pid, ms) {
   ms.forEach((m) => m.events.forEach((e) => e.type === 'shot' && e.pl === pid && shots.push({ e, m })));
   const head = h('div', { class: 'profile-h' }, h('h2', { text: p.name }),
     h('span', { class: 'sub', text: `${p.num != null ? '#' + p.num + ' · ' : ''}${GROUP_NAME[p.group]}${p.role ? ' (' + p.role + ')' : ''} · ${teamName(p.team)}` }));
-  const stats = h('div', { class: 'statline' }, [[a.min, 'Minutes'], [a.st, 'Starts'], [a.g, 'Goals'], [fmt(a.xg, 1), 'xG'], [a.ast, 'Assists'], [fmt(a.xa, 1), 'xA'], [a.rtN ? (a.rt / a.rtN).toFixed(2) : '–', 'Avg rating'], [fmt(100 * safe(a.pc, a.pa), 0) + '%', 'Pass completion'], [a.tkl + a.int, 'Tackles + int']].map(([v, l]) => h('div', null, h('b', { text: v }), h('span', { text: l }))));
+  // Only show the numbers this data source actually has
+  const items = [[a.min, 'Minutes', 0], [a.st, 'Starts', 0], [a.g, 'Goals', 0], [a.xg, 'xG', 1], [a.ast, 'Assists', 0], [a.xa, 'xA', 1], [a.rtN ? a.rt / a.rtN : NaN, 'Avg rating', 2], [100 * safe(a.pc, a.pa), 'Pass completion', 0, '%'], [a.tkl + a.int, 'Tackles + int', 0]];
+  const stats = h('div', { class: 'statline' }, items.filter(([v]) => has(v)).map(([v, l, d, u]) => h('div', null, h('b', { text: fmt(v, d) + (u || '') }), h('span', { text: l }))));
+  const span = DB.seasonPS && DB.seasonPS[pid] ? 'Season totals from FBref' : rangeLabel();
   if (!DB.hasEvents) {
-    return card({ title: 'Player profile', span: true }, rangeLabel(), head, stats,
+    return card({ title: 'Player profile', span: true }, span, head, stats,
       h('div', { class: 'grid' }, h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '6px' }, text: 'Percentile vs league ' + GROUP_NAME[p.group].toLowerCase() + 's · per 90' }), pctBars([pid], [A])),
         h('p', { class: 'note', text: 'Heatmaps and action maps need event data with pitch locations, which this data source does not include.' })));
   }
@@ -747,7 +755,7 @@ function playerProfile(pid, ms) {
     if (S.act === 'pass') am.append(legend([['Progressive pass', A, 'line'], ['Key pass', css('--c4'), 'line']]));
   }
   grid.append(am);
-  return card({ title: 'Player profile', span: true }, rangeLabel(), head, stats, grid);
+  return card({ title: 'Player profile', span: true }, span, head, stats, grid);
 }
 
 /* ---------- Compare ---------- */
@@ -968,6 +976,40 @@ function seasonCode(d = new Date()) {
   const y = d.getUTCMonth() >= 6 ? d.getUTCFullYear() : d.getUTCFullYear() - 1;
   return String(y % 100).padStart(2, '0') + String((y + 1) % 100).padStart(2, '0');
 }
+const FB_FIELD_NAMES = { min: 'minutes', st: 'starts', n: 'appearances', g: 'goals', ast: 'assists', xg: 'xG', npxg: 'npxG', xa: 'xAG', prog: 'progressive passes', progC: 'progressive carries', sh: 'shots', sot: 'shots on target', key: 'key passes', f3e: 'passes into final third', pc: 'passes completed', pa: 'passes', tkl: 'tackles', int: 'interceptions', clr: 'clearances', touch: 'touches', boxT: 'touches in box', drb: 'take-ons', drbW: 'successful take-ons', rec: 'recoveries', fls: 'fouls' };
+function flash(msg, cls) {
+  setTimeout(() => { const n = document.querySelector('#main'); if (n) n.prepend(h('p', { class: 'status ' + (cls || 'ok'), role: 'status', style: { marginTop: 0, marginBottom: '12px' }, text: msg })); }, 0);
+}
+// Add FBref season totals (one or more tables) to a team in the loaded season.
+function addFbref(texts, teamId, statusEl) {
+  const say = (msg) => { if (statusEl) { statusEl.className = 'status err'; statusEl.textContent = msg; } };
+  if (DB.source === 'demo') { say('Load a real season first (for example this season’s football-data.co.uk file), then add FBref player stats to it.'); return false; }
+  const r = attachFbref(DB, teamId, texts);
+  if (!r.tables) { say(r.errors[0] || 'No FBref player table found.'); return false; }
+  cache.clear();
+  const n = Object.values(DB.players).filter((p) => p.team === teamId && DB.seasonPS[p.id]).length;
+  S.team = teamId; S.tab = 'players'; S.player = null; S.sort = 'min'; S.per90 = true;
+  render();
+  flash(`Added FBref season stats for ${n} ${teamName(teamId)} players from ${r.tables} table${r.tables > 1 ? 's' : ''}: ${r.fields.map((f) => FB_FIELD_NAMES[f] || f).join(', ')}.` + (r.errors.length ? ' ' + r.errors.join(' ') : '') + ' Paste more FBref tables (Shooting, Passing, Defensive Actions, Possession) in the Data tab to fill in more columns.');
+  return true;
+}
+function fbrefCard() {
+  const st = h('div', { class: 'status', role: 'status' });
+  if (DB.source === 'demo') return card('Player stats from FBref', 'Season totals for each player', h('p', { class: 'note', style: { marginTop: 0 }, text: 'Load a real season first (this season’s football-data.co.uk file is quickest). Then come back here to add FBref player stats to Aberdeen or any other team.' }));
+  const ta = h('textarea', { id: 'fb-paste', rows: 6, placeholder: 'Paste an FBref player table here', spellcheck: 'false' });
+  const sel = h('select', { id: 'fb-team' }, DB.teams.map((t) => h('option', { value: t.id, selected: t.id === S.team, text: t.name })));
+  const go = () => { if (!ta.value.trim()) { st.className = 'status err'; st.textContent = 'Paste a table first.'; return; } addFbref([{ name: 'Pasted table', text: ta.value }], sel.value, st); };
+  return card('Player stats from FBref', 'Season totals for each player · nothing leaves your browser', h('div', { class: 'prose' },
+    h('ol', null,
+      h('li', null, 'Open the team’s squad page on FBref, e.g. ', h('a', { href: 'https://fbref.com/en/squads/8bbab7cf/Aberdeen-Stats', target: '_blank', rel: 'noopener', text: 'Aberdeen' }), '.'),
+      h('li', null, 'Above the ', h('b', { text: 'Standard Stats' }), ' table, open ', h('b', { text: 'Share & Export' }), ' and choose ', h('b', { text: 'Get table as CSV (for Excel)' }), '. Copy all the text that appears. Selecting and copying the table itself also works.'),
+      h('li', null, 'Paste it below, choose the team, and add it. Repeat with Shooting, Passing, Defensive Actions and Possession for more columns, and with other teams to compare players across the league.'))),
+    h('div', { class: 'field', style: { marginBottom: '8px' } }, h('label', { for: 'fb-team', text: 'Team' }), sel),
+    h('div', { class: 'field' }, h('label', { for: 'fb-paste', text: 'FBref table' }), ta),
+    h('div', { style: { marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' } }, h('button', { class: 'btn', type: 'button', onclick: go, text: 'Add player stats' })),
+    st,
+    h('p', { class: 'note', text: 'FBref figures are season totals, so the match filters do not change them. Data: FBref.com.' }));
+}
 function viewData(el) {
   const status = h('div', { class: 'status', role: 'status' });
   const input = h('input', { type: 'file', id: 'file', accept: '.json,.csv,application/json,text/csv', multiple: true, hidden: true, onchange: (e) => load(e.target.files) });
@@ -985,13 +1027,15 @@ function viewData(el) {
     try {
       const texts = await Promise.all(files.map(async (f) => ({ name: f.name, text: await f.text() })));
       // CSV files (football-data.co.uk) and JSON files (API-Football, StatsBomb) are told apart by content.
-      const csv = [], parsed = [];
+      const csv = [], parsed = [], fb = [];
       texts.forEach((f) => {
         const t = f.text.replace(/^﻿/, '').trimStart();
         if (t[0] === '[' || t[0] === '{') parsed.push({ name: f.name, data: JSON.parse(t) });
-        else { const rows = fdParseCSV(t); if (fdIsCSV(rows)) csv.push({ name: f.name, rows }); }
+        else if (fdIsCSV(fdParseCSV(t))) csv.push({ name: f.name, rows: fdParseCSV(t) });
+        else if (fbIsTable(fbParse(t))) fb.push({ name: f.name, text: t });
       });
-      if (!csv.length && !parsed.length) { status.className = 'status err'; status.textContent = 'These files are not in a format Touchline Lab reads. Use a football-data.co.uk CSV, the API-Football download, or StatsBomb event files.'; return; }
+      if (!csv.length && !parsed.length && !fb.length) { status.className = 'status err'; status.textContent = 'These files are not in a format Touchline Lab reads. Use a football-data.co.uk CSV, an FBref player table, the API-Football download, or StatsBomb event files.'; return; }
+      if (!csv.length && !parsed.length) { addFbref(fb, S.team, status); return; } // FBref tables add to the season already loaded
       const kind = csv.length ? 'fd' : isApiFootball(parsed) ? 'af' : 'sb';
       const { db, errors } = kind === 'fd' ? importFootballData(csv) : kind === 'af' ? importApiFootball(parsed) : importStatsBomb(parsed);
       if (!db.matches.length) {
@@ -1010,6 +1054,7 @@ function viewData(el) {
       S.cmp = (DB.teams.find((t) => t.id !== S.team) || DB.teams[0]).id;
       S.range = 'season'; S.player = null; S.match = null; S.pA = null; S.pB = null;
       S.tab = 'overview';
+      if (fb.length) { addFbref(fb, S.team, status); return; }
       render();
     } catch (err) {
       status.className = 'status err';
@@ -1031,6 +1076,7 @@ function viewData(el) {
   const fdUrl = 'https://www.football-data.co.uk/mmz4281/' + seasonCode() + '/SC0.csv';
   el.append(h('div', { class: 'grid' },
     card('Data source', DB.label, prose),
+    fbrefCard(),
     card('This season from football-data.co.uk', 'Free, no account or key · results, team stats and odds', h('div', { class: 'prose' },
       h('ol', null,
         h('li', null, 'Download this season’s Scottish Premiership file: ', h('a', { href: fdUrl, target: '_blank', rel: 'noopener', text: fdUrl.replace('https://www.', '') }), '. If the link does not work, go to ', h('a', { href: 'https://www.football-data.co.uk/scotlandm.php', target: '_blank', rel: 'noopener', text: 'football-data.co.uk/scotlandm.php' }), ' and click Premiership for the season you want.'),
