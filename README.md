@@ -29,6 +29,7 @@ belongs to that browser on that device.
 - `src/assessment.js` – Key players tab: position-based player ratings, squad leaders, season improvement
 - `src/seasons.js` – past seasons: season picker, Seasons tab (season by season, points race, players across seasons)
 - `src/opponents.js` – Opponents tab: record against each club, this season and all-time
+- `src/ask.js` – Ask AI tab: a prompt box that asks Claude for a custom table or chart from the loaded data
 - `src/store.js` – saves imports in the browser and restores them on open; built-in snapshot
 - `tools/embed-snapshot.mjs` – used by `build.sh --with-snapshot`
 - `tools/fetch-api-football.mjs` – downloads a season from API-Football into one file
@@ -174,3 +175,12 @@ Drop the file into the Data tab on top of the league season. Teams and players a
 league data (including API-Football's short names such as "K. Nisbet"), and the same ties from FBref or the
 Add a match form give way to the detailed version. The Competition filter starts on League only; set it to All competitions or Cups only to include cup ties
 in team and player stats, Key players and the match list. The league table always stays league only.
+
+## Ask AI
+When the page is opened on claude.ai (or in the Claude app), the **Ask AI** tab sends a question to Claude
+on the viewer's own account (the published artifact declares the `sample` capability; the first question
+asks the viewer's permission). Claude reads the data only through read-only page functions (league table,
+one metric for every team, a team's matches, player totals with sorting, one player's matches), which apply
+the filters on screen, and answers with a small JSON object (summary, table, chart) that the page renders.
+The prompt tells it to use only numbers the tools return. Answers are kept in the viewer's browser; tables
+copy as CSV. Opened anywhere else, the tab says it is unavailable and the rest of the app works as before.
