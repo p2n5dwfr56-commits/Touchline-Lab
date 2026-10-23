@@ -1,0 +1,918 @@
+'use strict';
+/* =====================================================================
+   Touchline Lab UI
+   ===================================================================== */
+const SVGNS = 'http://www.w3.org/2000/svg';
+let DB = null, DEMO = null;
+const S = {
+  tab: 'overview', team: 'ABE', venue: 'all', range: 'season', cmp: 'CEL',
+  heat: 'all', shots: 'for', group: 'all', per90: true, sort: 'min', player: null,
+  cmpMode: 'teams', pA: null, pB: null, match: null, act: 'pass',
+};
+const TABS = [['overview', 'Overview'], ['team', 'Team analysis'], ['players', 'Players'], ['compare', 'Compare'], ['matches', 'Matches'], ['data', 'Data']];
+
+/* ---------- DOM helpers ---------- */
+function h(tag, a, ...kids) {
+  const el = document.createElement(tag);
+  if (a) for (const k in a) {
+    const v = a[k];
+    if (v == null || v === false) continue;
+    if (k === 'class') el.className = v;
+    else if (k === 'text') el.textContent = v;
+    else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? '' : v);
+  }
+  kids.flat(Infinity).forEach((c) => c != null && c !== false && el.append(c.nodeType ? c : document.createTextNode(String(c))));
+  return el;
+}
+function sv(tag, a, ...kids) {
+  const el = document.createElementNS(SVGNS, tag);
+  if (a) for (const k in a) {
+    const v = a[k];
+    if (v == null) continue;
+    if (k === 'text') el.textContent = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v);
+  }
+  kids.flat().forEach((c) => c && el.append(c));
+  return el;
+}
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+function rgbOf(col) {
+  const c = document.createElement('canvas').getContext('2d');
+  c.fillStyle = col;
+  const v = c.fillStyle;
+  if (v[0] === '#') return [parseInt(v.slice(1, 3), 16), parseInt(v.slice(3, 5), 16), parseInt(v.slice(5, 7), 16)];
+  const m = v.match(/\d+/g);
+  return m ? m.slice(0, 3).map(Number) : [128, 128, 128];
+}
+const fmt = (v, d = 1) => (v == null || !isFinite(v) ? '–' : v.toFixed(d));
+const teamName = (id) => (DB.teamById[id] ? DB.teamById[id].name : id);
+const ordinal = (n) => n + (n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th');
+const fmtDate = (d) => (d ? new Date(d + 'T12:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '');
+function card(title, sub, ...body) {
+  const opts = typeof title === 'object' && title && !title.nodeType ? title : { title };
+  const head = h('div', { class: 'card-h' }, h('div', null, h('h2', { text: opts.title }), sub ? h('p', { text: sub }) : null), opts.tools || null);
+  return h('section', { class: 'card' + (opts.span ? ' span' : '') }, head, ...body);
+}
+function seg(options, value, onChange, label) {
+  return h('div', { class: 'seg', role: 'group', 'aria-label': label || '' },
+    options.map(([v, l]) => h('button', { type: 'button', 'aria-pressed': String(v === value), onclick: () => onChange(v), text: l })));
+}
+
+/* ---------- Tooltip ---------- */
+const tip = h('div', { class: 'tip', role: 'tooltip', hidden: true });
+function showTip(evt, lines) {
+  tip.replaceChildren();
+  lines.forEach((ln) => {
+    if (ln.color) tip.append(h('div', { class: 'row' }, h('i', { style: { background: ln.color } }), h('span', { class: 'tv', text: ln.v }), h('span', { class: 'tl', text: ln.l || '' })));
+    else tip.append(h('div', { class: ln.strong ? 'tv' : 'tl', text: ln.v }));
+  });
+  tip.hidden = false;
+  moveTip(evt);
+}
+function moveTip(evt) {
+  let x, y;
+  if (evt && evt.clientX != null && evt.type !== 'focus') { x = evt.clientX; y = evt.clientY; }
+  else { const r = evt.target.getBoundingClientRect(); x = r.left + r.width / 2; y = r.top; }
+  const w = tip.offsetWidth, hh = tip.offsetHeight;
+  tip.style.left = Math.min(window.innerWidth - w - 8, Math.max(8, x + 14)) + 'px';
+  tip.style.top = (y - hh - 12 < 8 ? y + 18 : y - hh - 12) + 'px';
+}
+const hideTip = () => (tip.hidden = true);
+function hover(el, fn) {
+  el.addEventListener('pointerenter', (e) => showTip(e, fn()));
+  el.addEventListener('pointermove', moveTip);
+  el.addEventListener('pointerleave', hideTip);
+  el.addEventListener('focus', (e) => showTip(e, fn()));
+  el.addEventListener('blur', hideTip);
+}
+
+/* ---------- Selection ---------- */
+function teamMatches(T, venue = S.venue) {
+  return DB.matches.filter((m) => (m.home === T || m.away === T) && (venue === 'all' || (venue === 'home' ? m.home === T : m.away === T)));
+}
+function scoped(T, range = S.range) {
+  const ms = teamMatches(T);
+  if (range.startsWith('m:')) { const m = ms.find((x) => x.id === range.slice(2)); return m ? [m] : ms; }
+  if (range === 'last5') return ms.slice(-5);
+  if (range === 'last3') return ms.slice(-3);
+  return ms;
+}
+const leagueRange = () => (S.range.startsWith('m:') ? 'season' : S.range);
+const rangeLabel = () => {
+  if (S.range.startsWith('m:')) { const m = DB.matches.find((x) => x.id === S.range.slice(2)); return m ? matchLabel(m, S.team) : 'Match'; }
+  return { season: 'Season to date', last5: 'Last 5 matches', last3: 'Last 3 matches' }[S.range];
+};
+const oppOf = (m, T) => (m.home === T ? m.away : m.home);
+const goalsFor = (m, T) => (m.home === T ? m.hg : m.ag);
+const goalsAg = (m, T) => (m.home === T ? m.ag : m.hg);
+const result = (m, T) => (goalsFor(m, T) > goalsAg(m, T) ? 'W' : goalsFor(m, T) === goalsAg(m, T) ? 'D' : 'L');
+const matchLabel = (m, T) => `R${m.round} v ${teamName(oppOf(m, T))} (${m.home === T ? 'H' : 'A'})`;
+
+const cache = new Map();
+function memo(key, fn) { if (!cache.has(key)) cache.set(key, fn()); return cache.get(key); }
+function leagueAggs() {
+  return memo('lg|' + S.venue + '|' + leagueRange(), () => DB.teams.map((t) => ({ team: t, a: aggTeam(scoped(t.id, leagueRange()), t.id) })).filter((r) => r.a.n));
+}
+function teamAgg(T, range = S.range) { return memo('ta|' + T + '|' + S.venue + '|' + range, () => aggTeam(scoped(T, range), T)); }
+function rankOf(mt, T) {
+  const rows = leagueAggs().map((r) => ({ id: r.team.id, v: mt.f(r.a) }));
+  const dir = mt.dir === -1 ? 1 : -1;
+  rows.sort((a, b) => dir * (a.v - b.v));
+  return { rank: rows.findIndex((r) => r.id === T) + 1, of: rows.length, avg: rows.reduce((s, r) => s + r.v, 0) / (rows.length || 1), max: Math.max(...rows.map((r) => r.v)), min: Math.min(...rows.map((r) => r.v)) };
+}
+const TM = Object.fromEntries(TEAM_METRICS.map((m) => [m.k, m]));
+
+/* ---------- Pitch ---------- */
+function pitch({ half = false, label = true } = {}) {
+  const vb = half ? '58 -3 65 87' : '-3 -3 126 87';
+  const svg = sv('svg', { viewBox: vb, class: half ? 'pitch half' : 'pitch', role: 'img' });
+  svg.append(sv('rect', { class: 'bg', x: -3, y: -3, width: 126, height: 87 }));
+  const heat = sv('g');
+  svg.append(heat);
+  const ln = sv('g', { class: 'ln' });
+  [
+    ['rect', { x: 0, y: 0, width: 120, height: 80 }], ['line', { x1: 60, y1: 0, x2: 60, y2: 80 }], ['circle', { cx: 60, cy: 40, r: 10 }],
+    ['rect', { x: 0, y: 18, width: 18, height: 44 }], ['rect', { x: 102, y: 18, width: 18, height: 44 }],
+    ['rect', { x: 0, y: 30, width: 6, height: 20 }], ['rect', { x: 114, y: 30, width: 6, height: 20 }],
+    ['rect', { x: -1.6, y: 36, width: 1.6, height: 8 }], ['rect', { x: 120, y: 36, width: 1.6, height: 8 }],
+    ['path', { d: 'M18 32 A10 10 0 0 1 18 48' }], ['path', { d: 'M102 32 A10 10 0 0 0 102 48' }],
+  ].forEach(([t, a]) => ln.append(sv(t, a)));
+  svg.append(ln);
+  [[12, 40], [108, 40], [60, 40]].forEach(([x, y]) => svg.append(sv('circle', { class: 'spot', cx: x, cy: y, r: 0.45 })));
+  if (label && !half) svg.append(sv('text', { class: 'dir', x: 60, y: 83.4, 'text-anchor': 'middle', text: 'Attacking direction →' }));
+  const marks = sv('g');
+  svg.append(marks);
+  return { svg, heat, marks };
+}
+function heatImage(grid, color, gamma = 1.1) {
+  const { nx, ny, v } = grid;
+  const sorted = Array.from(v).sort((x, y) => x - y);
+  const max = sorted[sorted.length - 1], lo = sorted[Math.floor(sorted.length * 0.3)];
+  const c = document.createElement('canvas');
+  c.width = nx; c.height = ny;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(nx, ny);
+  const [r, g, b] = rgbOf(color);
+  for (let i = 0; i < v.length; i++) {
+    const a = max > lo ? Math.pow(clamp((v[i] - lo) / (max - lo), 0, 1), gamma) : 0;
+    img.data[i * 4] = r; img.data[i * 4 + 1] = g; img.data[i * 4 + 2] = b; img.data[i * 4 + 3] = Math.round(a * 235);
+  }
+  ctx.putImageData(img, 0, 0);
+  return sv('image', { href: c.toDataURL(), x: 0, y: 0, width: 120, height: 80, preserveAspectRatio: 'none' });
+}
+function diffImage(gA, gB, colA, colB) {
+  const { nx, ny } = gA;
+  const sA = gA.v.reduce((s, x) => s + x, 0) || 1, sB = gB.v.reduce((s, x) => s + x, 0) || 1;
+  const d = new Float32Array(nx * ny);
+  let max = 0;
+  for (let i = 0; i < d.length; i++) { d[i] = gA.v[i] / sA - gB.v[i] / sB; max = Math.max(max, Math.abs(d[i])); }
+  const c = document.createElement('canvas');
+  c.width = nx; c.height = ny;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(nx, ny);
+  const A = rgbOf(colA), B = rgbOf(colB);
+  for (let i = 0; i < d.length; i++) {
+    const t = max ? d[i] / max : 0, col = t >= 0 ? A : B;
+    img.data.set([col[0], col[1], col[2], Math.round(Math.pow(Math.abs(t), 0.8) * 225)], i * 4);
+  }
+  ctx.putImageData(img, 0, 0);
+  return sv('image', { href: c.toDataURL(), x: 0, y: 0, width: 120, height: 80, preserveAspectRatio: 'none' });
+}
+const HEAT_MODES = [['all', 'All touches'], ['onball', 'On the ball'], ['def', 'Defensive actions']];
+function teamPoints(matches, T, mode, pid) {
+  const pts = [];
+  matches.forEach((m) => m.events.forEach((e) => {
+    if (pid ? e.pl === pid : e.team === T) {
+      const def = e.type in DEF_TYPES || e.type === 'duel';
+      if (mode === 'def' ? def : mode === 'onball' ? !def : true) pts.push([e.x, e.y]);
+    }
+    if (mode !== 'def' && e.type === 'pass' && e.ok && (pid ? e.rc === pid : e.team === T && e.rc)) pts.push([e.ex, e.ey]);
+  }));
+  return pts;
+}
+function heatmap(matches, T, mode, color, pid) {
+  const pts = teamPoints(matches, T, mode, pid);
+  const p = pitch();
+  p.svg.setAttribute('aria-label', 'Heatmap of ' + pts.length + ' actions');
+  if (pts.length) p.heat.append(heatImage(density(pts), color));
+  return { el: p.svg, n: pts.length };
+}
+
+/* ---------- Shot map ---------- */
+function shotMap(shots, color, opts = {}) {
+  const p = pitch({ half: !opts.full });
+  shots.slice().sort((a, b) => b.e.xg - a.e.xg).forEach(({ e, mirror, col }) => {
+    const x = mirror ? PL - e.x : e.x, y = mirror ? PW - e.y : e.y;
+    const c = col || color;
+    const r = 0.6 + Math.sqrt(e.xg) * 3.2;
+    const goal = e.out === 'goal';
+    const dot = sv('circle', { cx: x, cy: y, r, fill: c, 'fill-opacity': goal ? 1 : 0.22, stroke: goal ? css('--surface') : c, 'stroke-width': goal ? 0.5 : 0.35 });
+    hover(dot, () => {
+      const pl = DB.players[e.pl];
+      const m = opts.matchOf ? opts.matchOf(e) : null;
+      return [
+        { v: e.xg.toFixed(2) + ' xG', strong: true },
+        { v: (pl ? pl.name : 'Unknown') + ' · ' + Math.floor(e.t / 60 + 1) + "'" },
+        { v: { goal: 'Goal', saved: 'Saved', blocked: 'Blocked', off: 'Off target' }[e.out] + (e.head ? ' · header' : '') + (e.sp === 'pen' ? ' · penalty' : e.sp === 'fk' ? ' · free kick' : e.sp === 'corner' ? ' · from corner' : '') },
+        m ? { v: m } : null,
+      ].filter(Boolean);
+    });
+    p.marks.append(dot);
+  });
+  return p.svg;
+}
+function shotLegend(color) {
+  return h('div', { class: 'legend' },
+    h('span', null, h('i', { class: 'ring', style: { background: color, borderColor: color, color } }), 'Goal'),
+    h('span', null, h('i', { class: 'ring', style: { color } }), 'No goal'),
+    h('span', { text: 'Size shows xG' }));
+}
+function collectShots(matches, T, against) {
+  const out = [];
+  matches.forEach((m) => m.events.forEach((e) => {
+    if (e.type === 'shot' && (against ? e.team !== T : e.team === T)) out.push({ e, m });
+  }));
+  return out;
+}
+
+/* ---------- Pass network ---------- */
+function passNetwork(matches, T, color) {
+  const n = matches.length;
+  const mins = {};
+  matches.forEach((m) => (m.lineups[T] || []).forEach((l) => (mins[l.pid] = (mins[l.pid] || 0) + 1)));
+  matches.forEach((m) => Object.entries(m.minutes).forEach(([pid, mn]) => { if (DB.players[pid] && DB.players[pid].team === T) mins[pid] = (mins[pid] || 0) + mn / 1000; }));
+  const ids = Object.keys(mins).sort((a, b) => mins[b] - mins[a]).slice(0, 11);
+  const set = new Set(ids);
+  const pos = {}, cnt = {}, links = {};
+  ids.forEach((id) => { pos[id] = [0, 0, 0]; cnt[id] = 0; });
+  matches.forEach((m) => m.events.forEach((e) => {
+    if (e.team !== T) return;
+    if (set.has(e.pl) && (e.type === 'pass' || e.type === 'carry' || e.type === 'dribble' || e.type === 'shot')) { const q = pos[e.pl]; q[0] += e.x; q[1] += e.y; q[2]++; }
+    if (e.type === 'pass' && e.ok && e.rc && set.has(e.rc)) {
+      const q = pos[e.rc]; q[0] += e.ex; q[1] += e.ey; q[2]++;
+      if (set.has(e.pl)) { cnt[e.pl]++; const k = e.pl < e.rc ? e.pl + '|' + e.rc : e.rc + '|' + e.pl; links[k] = (links[k] || 0) + 1; }
+    }
+  }));
+  const p = pitch();
+  const thr = Math.max(3, n * 2.5);
+  const maxL = Math.max(1, ...Object.values(links));
+  const ink = css('--ink-2');
+  Object.entries(links).filter(([, v]) => v >= thr).sort((a, b) => a[1] - b[1]).forEach(([k, v]) => {
+    const [a, b] = k.split('|');
+    if (!pos[a][2] || !pos[b][2]) return;
+    const A = [pos[a][0] / pos[a][2], pos[a][1] / pos[a][2]], B = [pos[b][0] / pos[b][2], pos[b][1] / pos[b][2]];
+    const ln = sv('line', { x1: A[0], y1: A[1], x2: B[0], y2: B[1], stroke: ink, 'stroke-opacity': 0.25 + 0.55 * (v / maxL), 'stroke-width': 0.3 + 1.6 * (v / maxL), 'stroke-linecap': 'round' });
+    hover(ln, () => [{ v: (v / n).toFixed(1) + ' passes/match', strong: true }, { v: DB.players[a].name + ' ↔ ' + DB.players[b].name }]);
+    p.marks.append(ln);
+  });
+  const maxC = Math.max(1, ...Object.values(cnt));
+  const surf = css('--surface');
+  ids.forEach((id) => {
+    const q = pos[id];
+    if (!q[2]) return;
+    const x = q[0] / q[2], y = q[1] / q[2], pl = DB.players[id];
+    const r = 2.2 + 2.2 * Math.sqrt(cnt[id] / maxC);
+    const g = sv('g', { tabindex: 0 });
+    g.append(sv('circle', { cx: x, cy: y, r, fill: color, stroke: surf, 'stroke-width': 0.5 }));
+    g.append(sv('text', { x, y: y + 1.05, 'text-anchor': 'middle', 'font-size': 2.9, 'font-weight': 700, fill: '#fff', style: 'font-family: var(--font-display)', text: pl.num != null ? pl.num : pl.name.split(' ').pop().slice(0, 3) }));
+    g.append(sv('text', { x, y: y + r + 2.8, 'text-anchor': 'middle', 'font-size': 2.3, fill: css('--ink-2'), text: pl.name.split(' ').pop() }));
+    hover(g, () => [{ v: pl.name, strong: true }, { v: (cnt[id] / n).toFixed(1) + ' passes/match to this XI' }, { v: GROUP_NAME[pl.group] }]);
+    p.marks.append(g);
+  });
+  const forms = {};
+  matches.forEach((m) => m.forms[T] && (forms[m.forms[T]] = (forms[m.forms[T]] || 0) + 1));
+  const top = Object.entries(forms).sort((a, b) => b[1] - a[1]);
+  return { el: p.svg, forms: top, n };
+}
+
+/* ---------- Charts ---------- */
+function lineChart(box, { series, labels, tipFor, yFmt = (v) => v.toFixed(1), height = 230 }) {
+  const W = Math.max(280, box.clientWidth || 600), H = height, m = { l: 34, r: 12, t: 12, b: 26 };
+  const n = labels.length;
+  const ymax = Math.max(0.5, ...series.flatMap((s) => s.values)) * 1.08;
+  const step = ymax > 4 ? 1 : ymax > 2 ? 0.5 : 0.25;
+  const top = Math.ceil(ymax / step) * step;
+  const X = (i) => m.l + (n <= 1 ? (W - m.l - m.r) / 2 : (i * (W - m.l - m.r)) / (n - 1));
+  const Y = (v) => m.t + (H - m.t - m.b) * (1 - v / top);
+  const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img' });
+  const ax = sv('g', { class: 'axis' });
+  for (let v = 0; v <= top + 1e-9; v += step) {
+    ax.append(sv('line', { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), class: v === 0 ? 'baseline' : 'grid-line' }));
+    ax.append(sv('text', { x: m.l - 6, y: Y(v) + 4, 'text-anchor': 'end', text: yFmt(v) }));
+  }
+  const every = Math.max(1, Math.ceil(n / Math.floor((W - m.l) / 44)));
+  labels.forEach((l, i) => { if (i % every === 0 || i === n - 1) ax.append(sv('text', { x: X(i), y: H - 6, 'text-anchor': 'middle', text: l })); });
+  svg.append(ax);
+  series.forEach((s) => {
+    const d = s.values.map((v, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1)).join('');
+    svg.append(sv('path', { d, fill: 'none', stroke: s.color, 'stroke-width': 2, 'stroke-dasharray': s.dash || null, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+    s.values.forEach((v, i) => svg.append(sv('circle', { cx: X(i), cy: Y(v), r: i === n - 1 ? 4 : 2.6, fill: s.color, stroke: css('--surface'), 'stroke-width': 1.5 })));
+  });
+  const cross = sv('line', { y1: m.t, y2: H - m.b, stroke: css('--muted'), 'stroke-width': 1, opacity: 0 });
+  svg.append(cross);
+  const hit = sv('rect', { x: m.l - 10, y: 0, width: W - m.l - m.r + 20, height: H, fill: 'transparent' });
+  const pick = (evt) => {
+    const r = svg.getBoundingClientRect();
+    const px = ((evt.clientX - r.left) / r.width) * W;
+    const i = clamp(Math.round(((px - m.l) / (W - m.l - m.r)) * (n - 1)), 0, n - 1);
+    cross.setAttribute('x1', X(i)); cross.setAttribute('x2', X(i)); cross.setAttribute('opacity', 1);
+    showTip(evt, tipFor(i));
+  };
+  hit.addEventListener('pointermove', pick);
+  hit.addEventListener('pointerenter', pick);
+  hit.addEventListener('pointerleave', () => { cross.setAttribute('opacity', 0); hideTip(); });
+  svg.append(hit);
+  box.append(svg);
+}
+
+function legend(items) {
+  return h('div', { class: 'legend' }, items.map(([label, color, kind]) => h('span', null, h('i', { class: kind || '', style: { background: kind === 'line-dash' ? `repeating-linear-gradient(90deg, ${color} 0 5px, transparent 5px 8px)` : color } }), label)));
+}
+
+const PHASE_COLORS = { bu: '--c1', pr: '--c3', f3: '--c2', tr: '--c5', sp: '--c4' };
+function phaseBar(ph, names) {
+  const tot = PHASES.reduce((s, k) => s + ph[k], 0) || 1;
+  return h('div', { class: 'stackbar' }, PHASES.map((k) => {
+    const pct = (100 * ph[k]) / tot;
+    const el = h('div', { class: k === 'sp' || k === 'pr' ? 'dk' : '', style: { width: pct + '%', background: css(PHASE_COLORS[k]) }, tabindex: 0, text: pct >= 9 ? Math.round(pct) + '%' : '' });
+    hover(el, () => [{ v: pct.toFixed(1) + '%', strong: true }, { v: names[k] }, { v: 'Share of time ' + (names === PHASE_IN ? 'with the ball' : 'without the ball') }]);
+    return el;
+  }));
+}
+function phaseLegend(names) { return legend(PHASES.map((k) => [names[k], css(PHASE_COLORS[k])])); }
+function phasePct(ph) { const tot = PHASES.reduce((s, k) => s + ph[k], 0) || 1; return Object.fromEntries(PHASES.map((k) => [k, (100 * ph[k]) / tot])); }
+
+function hbars(rows, color) {
+  // rows: {label, value, max, text, mark, markLabel}
+  return h('div', { class: 'hbars' }, rows.map((r) => {
+    const track = h('div', { class: 'track' }, h('div', { class: 'fill', style: { width: clamp((100 * r.value) / (r.max || 1), 0, 100) + '%', background: r.color || color } }));
+    if (r.mark != null) track.append(h('div', { class: 'mark', style: { left: clamp((100 * r.mark) / (r.max || 1), 0, 100) + '%' } }));
+    const row = h('div', { class: 'hbar', tabindex: 0 }, h('div', { text: r.label }), track, h('div', { class: 'val', text: r.text }));
+    if (r.tip) hover(row, r.tip);
+    return row;
+  }));
+}
+
+/* ---------- Shell ---------- */
+const root = h('div');
+let mainEl, filtersEl, tabsEl, chipEl;
+function buildShell() {
+  const logo = sv('svg', { viewBox: '0 0 30 20', 'aria-hidden': 'true' },
+    sv('rect', { x: 0.75, y: 0.75, width: 28.5, height: 18.5, rx: 1.5, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.5 }),
+    sv('line', { x1: 15, y1: 1, x2: 15, y2: 19, stroke: 'currentColor', 'stroke-width': 1.2 }),
+    sv('circle', { cx: 15, cy: 10, r: 3.2, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.2 }),
+    sv('rect', { x: 22, y: 5, width: 7, height: 10, fill: 'var(--accent)' }));
+  chipEl = h('span', { class: 'chip' });
+  filtersEl = h('div', { class: 'filters' });
+  tabsEl = h('nav', { class: 'tabs', role: 'tablist', 'aria-label': 'Sections' });
+  const top = h('header', { class: 'top' }, h('div', { class: 'wrap' },
+    h('div', { class: 'bar' }, h('div', { class: 'brand' }, logo, 'Touchline Lab'), chipEl, filtersEl), tabsEl));
+  mainEl = h('main', { class: 'wrap', id: 'main' });
+  root.append(top, mainEl);
+  document.body.append(root, tip);
+}
+function renderChrome() {
+  chipEl.className = 'chip' + (DB.source === 'demo' ? '' : ' real');
+  chipEl.replaceChildren(h('span', { class: 'dot' }), DB.source === 'demo' ? 'Synthetic demo data' : DB.label);
+  chipEl.title = DB.source === 'demo' ? 'Generated sample season. Import real event data in the Data tab.' : '';
+  const teamSel = h('select', { id: 'f-team', onchange: (e) => { S.team = e.target.value; if (S.cmp === S.team) S.cmp = DB.teams.find((t) => t.id !== S.team).id; if (S.range.startsWith('m:')) S.range = 'season'; S.player = null; S.match = null; render(); } },
+    DB.teams.map((t) => h('option', { value: t.id, selected: t.id === S.team, text: t.name })));
+  const ms = teamMatches(S.team);
+  const rangeSel = h('select', { id: 'f-range', onchange: (e) => { S.range = e.target.value; render(); } },
+    h('option', { value: 'season', text: 'Season to date', selected: S.range === 'season' }),
+    ms.length > 5 ? h('option', { value: 'last5', text: 'Last 5 matches', selected: S.range === 'last5' }) : null,
+    ms.length > 3 ? h('option', { value: 'last3', text: 'Last 3 matches', selected: S.range === 'last3' }) : null,
+    h('optgroup', { label: 'Single match' }, ms.slice().reverse().map((m) => h('option', { value: 'm:' + m.id, selected: S.range === 'm:' + m.id, text: matchLabel(m, S.team) + ' ' + goalsFor(m, S.team) + '–' + goalsAg(m, S.team) }))));
+  const venueSel = h('select', { id: 'f-venue', onchange: (e) => { S.venue = e.target.value; if (S.range.startsWith('m:')) S.range = 'season'; render(); } },
+    [['all', 'Home & away'], ['home', 'Home'], ['away', 'Away']].map(([v, l]) => h('option', { value: v, selected: S.venue === v, text: l })));
+  filtersEl.replaceChildren(
+    h('div', { class: 'field' }, h('label', { for: 'f-team', text: 'Team' }), teamSel),
+    h('div', { class: 'field' }, h('label', { for: 'f-venue', text: 'Venue' }), venueSel),
+    h('div', { class: 'field' }, h('label', { for: 'f-range', text: 'Matches' }), rangeSel));
+  tabsEl.replaceChildren(...TABS.map(([k, l]) => h('button', { role: 'tab', 'aria-selected': String(S.tab === k), onclick: () => { S.tab = k; try { history.replaceState(null, '', '#' + k); } catch (e) {} render(); window.scrollTo({ top: 0 }); }, text: l })));
+}
+function render() {
+  hideTip();
+  renderChrome();
+  mainEl.replaceChildren();
+  const views = { overview: viewOverview, team: viewTeam, players: viewPlayers, compare: viewCompare, matches: viewMatches, data: viewData };
+  (views[S.tab] || viewOverview)(mainEl);
+}
+
+/* ---------- Overview ---------- */
+function viewOverview(el) {
+  const T = S.team, ms = scoped(T), a = teamAgg(T);
+  const table = leagueTable(DB, null);
+  const row = table.find((r) => r.team.id === T);
+  const all = teamMatches(T, 'all');
+  const form = all.slice(-5).map((m) => result(m, T));
+  el.append(h('div', { class: 'hero' },
+    h('h1', { text: teamName(T) }),
+    h('div', { class: 'meta' },
+      row ? h('span', { text: `${ordinal(row.pos)} of ${table.length} · ${row.a.pts} pts · W${row.a.w} D${row.a.d} L${row.a.l}` }) : null,
+      h('span', { class: 'form', 'aria-label': 'Last five results' }, form.map((r) => h('span', { class: r, text: r }))),
+      h('span', { class: 'sub', text: rangeLabel() + (S.venue !== 'all' ? ' · ' + S.venue : '') }))));
+
+  const kp = [['xg', 'xG for', ''], ['xga', 'xG against', ''], ['poss', 'Possession', '%'], ['ppda', 'PPDA', ''], ['tilt', 'Field tilt', '%'], ['g', 'Goals', '']];
+  el.append(h('div', { class: 'kpis' }, kp.map(([k, l, u]) => {
+    const mt = TM[k], v = mt.f(a), rk = rankOf(mt, T);
+    const tile = h('div', { class: 'kpi', tabindex: 0 }, h('div', { class: 'eyebrow', text: l + (mt.u === '/match' ? ' / match' : '') }), h('div', { class: 'v' }, fmt(v, k === 'poss' || k === 'tilt' ? 1 : mt.d === 2 ? 2 : 1), u ? h('small', { text: u }) : null),
+      h('div', { class: 'r' }, h('b', { text: ordinal(rk.rank) }), ` in league · avg ${fmt(rk.avg, mt.d === 0 ? 0 : mt.d === 2 ? 2 : 1)}`));
+    if (mt.tip) hover(tile, () => [{ v: mt.l, strong: true }, { v: mt.tip }]);
+    return tile;
+  })));
+
+  const grid = h('div', { class: 'grid' });
+  el.append(grid);
+  // League table
+  const lt = h('table', null,
+    h('thead', null, h('tr', null, ['#', 'Team', 'P', 'W', 'D', 'L', 'GF', 'GA', 'GD', 'Pts', 'xG', 'xGA', 'xGD'].map((c, i) => h('th', { class: i === 1 ? 'l' : '', text: c })))),
+    h('tbody', null, table.map((r) => {
+      const t = r.a;
+      return h('tr', { class: r.team.id === T ? 'focus' : '', onclick: () => { S.team = r.team.id; if (S.cmp === S.team) S.cmp = T; S.range = 'season'; render(); }, title: 'Show ' + r.team.name },
+        h('td', { text: r.pos }), h('td', { class: 'l', text: r.team.name }), h('td', { text: t.n }), h('td', { text: t.w }), h('td', { text: t.d }), h('td', { text: t.l }),
+        h('td', { text: t.g }), h('td', { text: t.ga }), h('td', { text: (t.g - t.ga > 0 ? '+' : '') + (t.g - t.ga) }), h('td', null, h('b', { text: t.pts })),
+        h('td', { text: t.xg.toFixed(1) }), h('td', { text: t.xga.toFixed(1) }), h('td', { text: (t.xg - t.xga > 0 ? '+' : '') + (t.xg - t.xga).toFixed(1) }));
+    })));
+  grid.append(card('League table', 'All matches · click a row to switch team', h('div', { class: 'tbl-wrap' }, lt)));
+
+  // xG trend
+  const trend = card('xG by match', 'Chance quality created and conceded, ' + all.length + ' matches');
+  grid.append(trend);
+  const box = h('div');
+  trend.append(box);
+  const A = css('--team-a'), B = css('--ink-2');
+  lineChart(box, {
+    labels: all.map((m) => 'R' + m.round),
+    series: [{ name: 'xG for', color: A, values: all.map((m) => m.ts[T].xg) }, { name: 'xG against', color: B, dash: '5 4', values: all.map((m) => m.ts[T].xga) }],
+    yFmt: (v) => v.toFixed(v % 1 ? 1 : 0),
+    tipFor: (i) => { const m = all[i]; return [{ v: matchLabel(m, T) }, { v: `${result(m, T)} ${goalsFor(m, T)}–${goalsAg(m, T)}`, strong: true }, { color: A, v: m.ts[T].xg.toFixed(2), l: 'xG for' }, { color: B, v: m.ts[T].xga.toFixed(2), l: 'xG against' }]; },
+  });
+  trend.append(legend([['xG for', A, 'line'], ['xG against', B, 'line line-dash']]));
+
+  // Possession snapshot
+  grid.append(card('Game states', rangeLabel() + ' · share of ball-in-play time', phaseBlock(a)));
+
+  // Top players
+  const pls = Object.values(DB.players).filter((p) => p.team === T).map((p) => ({ p, a: aggPlayer(ms, p.id) })).filter((x) => x.a.min > 0);
+  const top = (k, f) => pls.slice().sort((x, y) => f(y.a) - f(x.a)).slice(0, 3);
+  const leaders = h('div', { class: 'grid three' });
+  [['Goals', (a) => a.g, (a) => a.g + ' (' + a.xg.toFixed(1) + ' xG)'], ['Chances created', (a) => a.xa + a.key * 0.01, (a) => a.key + ' key passes · ' + a.xa.toFixed(1) + ' xA'], ['Progressive passes', (a) => a.prog, (a) => a.prog + ' in ' + a.min + ' min'], ['Ball winning', (a) => a.tkl + a.int + a.rec, (a) => a.tkl + a.int + a.rec + ' tackles, interceptions & recoveries']].forEach(([l, f, t]) => {
+    leaders.append(h('div', null, h('div', { class: 'eyebrow', text: l }), h('ol', { style: { margin: '6px 0 0', paddingLeft: '18px' } }, top(l, f).map((x) => h('li', null, h('a', { href: '#players', onclick: (e) => { e.preventDefault(); S.tab = 'players'; S.player = x.p.id; render(); }, style: { color: 'var(--ink)' }, text: x.p.name }), h('div', { class: 'sub', text: t(x.a) }))))));
+  });
+  grid.append(card({ title: 'Squad leaders', span: false }, rangeLabel(), leaders));
+}
+function phaseBlock(a, compact) {
+  const L = leagueAggs();
+  const avg = (key) => Object.fromEntries(PHASES.map((k) => [k, L.reduce((s, r) => s + phasePct(r.a[key])[k], 0) / L.length]));
+  const ai = avg('ph'), ao = avg('oph');
+  const pi = phasePct(a.ph), po = phasePct(a.oph);
+  const wrap = h('div');
+  wrap.append(h('div', { class: 'phase-row' }, h('div', { class: 'eyebrow', text: 'With the ball · ' + fmt(TM.poss.f(a), 0) + '%' }), phaseBar(a.ph, PHASE_IN)));
+  wrap.append(phaseLegend(PHASE_IN));
+  wrap.append(h('div', { class: 'phase-row', style: { marginTop: '14px' } }, h('div', { class: 'eyebrow', text: 'Without the ball · ' + fmt(100 - TM.poss.f(a), 0) + '%' }), phaseBar(a.oph, PHASE_OUT)));
+  wrap.append(phaseLegend(PHASE_OUT));
+  if (!compact) {
+    const t = h('table', { style: { marginTop: '14px' } }, h('thead', null, h('tr', null, h('th', { class: 'l', text: 'In possession' }), h('th', { text: 'Team' }), h('th', { text: 'League' }), h('th', { class: 'l', text: 'Out of possession' }), h('th', { text: 'Team' }), h('th', { text: 'League' }))),
+      h('tbody', null, PHASES.map((k) => h('tr', { style: { cursor: 'default' } }, h('td', { class: 'l', text: PHASE_IN[k] }), h('td', { text: pi[k].toFixed(0) + '%' }), h('td', { class: 'sub', text: ai[k].toFixed(0) + '%' }), h('td', { class: 'l', text: PHASE_OUT[k] }), h('td', { text: po[k].toFixed(0) + '%' }), h('td', { class: 'sub', text: ao[k].toFixed(0) + '%' })))));
+    wrap.append(h('div', { class: 'tbl-wrap' }, t));
+    wrap.append(h('p', { class: 'note', text: 'Build-up = ball in own third; progression = middle third; final third = attacking third. Transition = first 7 seconds after winning the ball in open play. Set piece = first 12 seconds after a corner or free kick. Out-of-possession states mirror the opponent’s phase.' }));
+  }
+  return wrap;
+}
+
+/* ---------- Team analysis ---------- */
+function viewTeam(el) {
+  const T = S.team, ms = scoped(T), a = teamAgg(T), A = css('--team-a');
+  el.append(h('div', { class: 'hero' }, h('h1', { text: teamName(T) }), h('div', { class: 'meta' }, h('span', { text: rangeLabel() + ' · ' + ms.length + (ms.length === 1 ? ' match' : ' matches') }))));
+  const grid = h('div', { class: 'grid' });
+  el.append(grid);
+
+  // Heatmap
+  const hm = heatmap(ms, T, S.heat, A);
+  grid.append(card({ title: 'Touch map', tools: seg(HEAT_MODES, S.heat, (v) => { S.heat = v; render(); }, 'Heatmap type') }, hm.n + ' events · ' + (S.heat === 'def' ? 'tackles, interceptions, recoveries, clearances, duels, fouls' : 'includes passes received'), hm.el));
+
+  // Shot map
+  const against = S.shots === 'against';
+  const shots = collectShots(ms, T, against);
+  const xgSum = shots.reduce((s, x) => s + x.e.xg, 0), goals = shots.filter((x) => x.e.out === 'goal').length;
+  const col = against ? css('--team-b') : A;
+  grid.append(card({ title: 'Shot map', tools: seg([['for', 'Shots for'], ['against', 'Shots against']], S.shots, (v) => { S.shots = v; render(); }, 'Shots') }, against ? 'Opponent shots, shown attacking right' : 'Shots taken',
+    h('div', { class: 'statline' }, [[shots.length, 'Shots'], [goals, 'Goals'], [xgSum.toFixed(1), 'xG'], [(xgSum / (shots.length || 1)).toFixed(2), 'xG / shot'], [(xgSum - goals > 0 ? '−' : '+') + Math.abs(goals - xgSum).toFixed(1), 'Goals vs xG']].map(([v, l]) => h('div', null, h('b', { text: v }), h('span', { text: l })))),
+    shotMap(shots.map((x) => ({ e: x.e })), col, { matchOf: (e) => { const m = shots.find((s) => s.e === e).m; return matchLabel(m, T); } }), shotLegend(col)));
+
+  // Possession
+  grid.append(card('Game states', 'Share of ball-in-play time by phase, with the ball and without it', phaseBlock(a)));
+
+  // Possession outcomes funnel
+  const L = leagueAggs();
+  const lav = (f) => L.reduce((s, r) => s + f(r.a), 0) / L.length;
+  const steps = [
+    ['Possessions', (x) => x.poss], ['Reached middle third', (x) => x.possMid], ['Reached final third', (x) => x.possF3], ['Reached the box', (x) => x.possBox], ['Ended in a shot', (x) => x.possShot], ['Ended in a goal', (x) => x.possGoal],
+  ];
+  grid.append(card('Possession outcomes', `How far ${teamName(T)}'s possessions get · per match, line marks league average`,
+    hbars(steps.map(([l, f]) => {
+      const v = f(a) / (a.n || 1), lv = lav((x) => f(x) / (x.n || 1)), max = a.poss / (a.n || 1);
+      return { label: l, value: v, max: Math.max(max, lav((x) => x.poss / (x.n || 1))), mark: lv, text: v.toFixed(1) + '', tip: () => [{ v: v.toFixed(1) + ' per match', strong: true }, { v: ((100 * f(a)) / (a.poss || 1)).toFixed(1) + '% of possessions' }, { v: 'League average ' + lv.toFixed(1) }] };
+    }), A),
+    h('p', { class: 'note', text: `${fmt(TM.ppp.f(a), 1)} passes per possession · ${fmt(TM.direct.f(a), 0)}% of passing distance goes forward.` })));
+
+  // Pass network
+  const pn = passNetwork(ms, T, A);
+  const fl = pn.forms.map(([f, c]) => f + (pn.forms.length > 1 ? ' (' + c + ')' : '')).join(', ');
+  grid.append(card('Shape & passing network', `${ms.length === 1 ? 'Starting XI' : 'Most-used XI'} at average positions · lines join pairs with ${ms.length === 1 ? '3+ passes' : '2.5+ passes per match'} · formation: ${fl || '–'}`, pn.el));
+
+  // Territory zones
+  grid.append(card('Territory', 'Share of on-ball actions by zone (thirds × lanes)', zoneGrid(teamPoints(ms, T, 'onball'), A)));
+
+  // Profile
+  grid.append(card({ title: 'Team profile', span: true }, `${rangeLabel()} vs the other ${L.length - 1} teams over the same span · bar = league rank, longer is better`, profileTable(T)));
+}
+function zoneGrid(pts, color) {
+  const xs = [0, 20, 40, 60, 80, 100, 120], ys = [0, 18, 30, 50, 62, 80];
+  const cnt = Array.from({ length: 6 }, () => [0, 0, 0, 0, 0]);
+  pts.forEach(([x, y]) => {
+    const i = clamp(Math.floor(x / 20), 0, 5);
+    let j = 0;
+    while (j < 4 && y >= ys[j + 1]) j++;
+    cnt[i][j]++;
+  });
+  const tot = pts.length || 1, max = Math.max(1, ...cnt.flat());
+  const p = pitch();
+  const [r, g, b] = rgbOf(color);
+  cnt.forEach((col, i) => col.forEach((c, j) => {
+    const x = xs[i], y = ys[j], w = 20, hh = ys[j + 1] - ys[j];
+    const a = c / max;
+    const rect = sv('rect', { x: x + 0.4, y: y + 0.4, width: w - 0.8, height: hh - 0.8, fill: `rgba(${r},${g},${b},${(a * 0.85).toFixed(3)})` });
+    hover(rect, () => [{ v: ((100 * c) / tot).toFixed(1) + '%', strong: true }, { v: c + ' actions' }]);
+    p.heat.append(rect);
+    if (c / tot >= 0.015) p.marks.append(sv('text', { x: x + w / 2, y: y + hh / 2 + 1.3, 'text-anchor': 'middle', 'font-size': 3.4, 'font-weight': 600, fill: a > 0.55 ? '#fff' : css('--ink'), 'pointer-events': 'none', text: Math.round((100 * c) / tot) + '%' }));
+  }));
+  return p.svg;
+}
+function profileTable(T) {
+  const a = teamAgg(T, leagueRange());
+  const groups = {};
+  TEAM_METRICS.filter((m) => m.grp !== 'Results').forEach((m) => (groups[m.grp] = groups[m.grp] || []).push(m));
+  const wrap = h('div', { class: 'grid three' });
+  Object.entries(groups).forEach(([g, list]) => {
+    const n = leagueAggs().length;
+    wrap.append(h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '8px' }, text: g }), hbars(list.map((mt) => {
+      const rk = rankOf(mt, T), v = mt.f(a);
+      const score = mt.dir === 0 ? (v - rk.min) / ((rk.max - rk.min) || 1) * (n - 1) + 1 : n - rk.rank + 1;
+      return {
+        label: mt.l + (mt.u === '/match' ? '' : mt.u ? ' (' + mt.u + ')' : ''), value: score, max: n,
+        color: mt.dir === 0 ? css('--c1') : css('--team-a'),
+        text: fmt(v, mt.d) + (mt.dir === 0 ? '' : ' · ' + ordinal(rk.rank)),
+        tip: () => [{ v: fmt(v, mt.d) + (mt.u ? ' ' + mt.u : ''), strong: true }, { v: mt.l }, { v: (mt.dir === 0 ? 'Style metric: ' + ordinal(rk.rank) + ' highest' : ordinal(rk.rank) + ' of ' + rk.of) + ' · league avg ' + fmt(rk.avg, mt.d) }, mt.tip ? { v: mt.tip } : null].filter(Boolean),
+      };
+    }))));
+  });
+  return h('div', null, wrap, h('p', { class: 'note', text: 'Red bars rank good-or-bad metrics (1st = best). Blue bars are style metrics with no right answer, scaled from league lowest to highest.' }));
+}
+
+/* ---------- Players ---------- */
+const PCOLS = [
+  ['min', 'Min', (a) => a.min, 0, false], ['g', 'G', (a) => a.g, 2], ['xg', 'xG', (a) => a.xg, 2], ['ast', 'A', (a) => a.ast, 2], ['xa', 'xA', (a) => a.xa, 2], ['sh', 'Sh', (a) => a.sh, 2],
+  ['key', 'KP', (a) => a.key, 2], ['pct', 'Pass%', (a) => 100 * safe(a.pc, a.pa), 0, false], ['prog', 'PrgP', (a) => a.prog, 2], ['progC', 'PrgC', (a) => a.progC, 2],
+  ['drbW', 'Drb', (a) => a.drbW, 2], ['tkl', 'Tkl', (a) => a.tkl, 2], ['int', 'Int', (a) => a.int, 2], ['rec', 'Rec', (a) => a.rec, 2], ['duel', 'Duel%', (a) => 100 * safe(a.duelW, a.duel), 0, false], ['touch', 'Touch', (a) => a.touch, 1],
+];
+const PCOL_TIPS = { min: 'Minutes', g: 'Goals', xg: 'Expected goals', ast: 'Assists', xa: 'Expected assists', sh: 'Shots', key: 'Key passes', pct: 'Pass completion', prog: 'Progressive passes', progC: 'Progressive carries', drbW: 'Successful dribbles', tkl: 'Tackles', int: 'Interceptions', rec: 'Ball recoveries', duel: 'Duels won', touch: 'Touches' };
+function colVal(c, a) { const v = c[2](a); return S.per90 && c[4] !== false && c[0] !== 'min' ? safe(v * 90, a.min) : v; }
+function viewPlayers(el) {
+  const T = S.team, ms = scoped(T);
+  let rows = Object.values(DB.players).filter((p) => p.team === T).map((p) => ({ p, a: aggPlayer(ms, p.id) })).filter((r) => r.a.min > 0);
+  if (S.group !== 'all') rows = rows.filter((r) => r.p.group === S.group);
+  const sc = PCOLS.find((c) => c[0] === S.sort) || PCOLS[0];
+  rows.sort((x, y) => colVal(sc, y.a) - colVal(sc, x.a));
+  if (!S.player || !DB.players[S.player] || DB.players[S.player].team !== T) S.player = rows[0] ? rows[0].p.id : null;
+
+  if (S.player) el.append(playerProfile(S.player, ms));
+
+  const tools = h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
+    seg([['all', 'All'], ['GK', 'GK'], ['DEF', 'DEF'], ['MID', 'MID'], ['FWD', 'FWD']], S.group, (v) => { S.group = v; render(); }, 'Position'),
+    seg([[true, 'Per 90'], [false, 'Totals']], S.per90, (v) => { S.per90 = v; render(); }, 'Units'));
+  const t = h('table', null,
+    h('thead', null, h('tr', null, h('th', { class: 'l', text: 'Player' }), PCOLS.map((c) => h('th', { class: 'sortable' + (c[0] === S.sort ? ' sorted' : ''), title: PCOL_TIPS[c[0]], onclick: () => { S.sort = c[0]; render(); }, text: c[1] })))),
+    h('tbody', null, rows.map((r) => h('tr', { class: r.p.id === S.player ? 'focus' : '', onclick: () => { S.player = r.p.id; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); } },
+      h('td', { class: 'l' }, h('span', { class: 'badge', text: r.p.role || r.p.group }), r.p.name),
+      PCOLS.map((c) => h('td', { text: fmt(colVal(c, r.a), c[0] === 'min' || c[3] === 0 ? 0 : S.per90 ? 2 : c[0] === 'xg' || c[0] === 'xa' ? 1 : 0) }))))));
+  el.append(card({ title: 'Squad', tools }, `${teamName(T)} · ${rangeLabel()} · ${S.per90 ? 'per 90 minutes' : 'totals'} · click a column to sort, a row to open the player`, h('div', { class: 'tbl-wrap' }, t)));
+}
+function peerPool(group) {
+  return memo('peer|' + group + '|' + S.venue + '|' + leagueRange(), () => {
+    const out = [];
+    DB.teams.forEach((t) => {
+      const ms = scoped(t.id, leagueRange());
+      Object.values(DB.players).forEach((p) => { if (p.team === t.id && p.group === group) { const a = aggPlayer(ms, p.id); if (a.min >= 1) out.push({ p, a }); } });
+    });
+    const maxMin = Math.max(...out.map((x) => x.a.min), 1);
+    return out.filter((x) => x.a.min >= Math.min(270, maxMin * 0.3));
+  });
+}
+const PROFILE_METRICS = {
+  FWD: ['npxg', 'sh', 'g', 'xa', 'key', 'boxT', 'drbW', 'progC', 'pct', 'rec', 'duel'],
+  MID: ['npxg', 'xa', 'key', 'prog', 'progC', 'f3e', 'pct', 'drbW', 'tkl', 'int', 'rec'],
+  DEF: ['prog', 'f3e', 'pct', 'progC', 'xa', 'tkl', 'int', 'rec', 'clr', 'duel', 'npxg'],
+  GK: ['pa', 'pct', 'prog', 'f3e', 'rec', 'clr'],
+};
+function percentile(pid, group, k) {
+  const pool = peerPool(group);
+  const mt = PLAYER_METRICS.find((m) => m.k === k);
+  const vals = pool.map((x) => playerValue(mt, x.a, true));
+  const me = pool.find((x) => x.p.id === pid);
+  if (!me || vals.length < 3) return null;
+  const v = playerValue(mt, me.a, true);
+  const below = vals.filter((x) => x < v).length, eq = vals.filter((x) => x === v).length;
+  return { pct: Math.round((100 * (below + eq / 2)) / vals.length), v, n: vals.length };
+}
+function pctBars(players, colors) {
+  const group = DB.players[players[0]].group;
+  const keys = PROFILE_METRICS[group] || PROFILE_METRICS.MID;
+  return h('div', { class: 'pct' }, keys.map((k) => {
+    const mt = PLAYER_METRICS.find((m) => m.k === k);
+    return h('div', { class: 'pct-row' }, h('div', { class: 'nm', text: mt.l + (mt.p90 ? ' /90' : '') }),
+      h('div', { class: 'pct-bars' }, players.map((pid, i) => {
+        const r = percentile(pid, DB.players[pid].group, k);
+        const bar = h('div', { class: 'pct-bar', tabindex: 0 }, h('div', { class: 'trk' }, h('div', { class: 'fill', style: { width: (r ? r.pct : 0) + '%', background: colors[i] } })), h('span', { class: 't', text: r ? fmt(r.v, mt.d) + ' · ' + ordinal(r.pct) : 'n/a' }));
+        hover(bar, () => r ? [{ v: ordinal(r.pct) + ' percentile', strong: true }, { v: DB.players[pid].name + ': ' + fmt(r.v, mt.d) + ' ' + mt.l.toLowerCase() + (mt.p90 ? ' per 90' : '') }, { v: 'vs ' + r.n + ' league ' + GROUP_NAME[DB.players[pid].group].toLowerCase() + 's' }] : [{ v: 'Not enough minutes for a percentile' }]);
+        return bar;
+      })));
+  }));
+}
+function actionMap(ms, pid, mode, color) {
+  const p = pitch();
+  const surf = css('--surface');
+  ms.forEach((m) => m.events.forEach((e) => {
+    if (e.pl !== pid) return;
+    if (mode === 'pass' && e.type === 'pass' && e.ok && (progressive(e.x, e.y, e.ex, e.ey) || e.key)) {
+      const key = e.key;
+      const g = sv('g');
+      g.append(sv('line', { x1: e.x, y1: e.y, x2: e.ex, y2: e.ey, stroke: key ? css('--c4') : color, 'stroke-width': key ? 0.7 : 0.45, 'stroke-opacity': key ? 1 : 0.7, 'stroke-linecap': 'round' }));
+      g.append(sv('circle', { cx: e.ex, cy: e.ey, r: 0.8, fill: key ? css('--c4') : color }));
+      hover(g, () => [{ v: key ? 'Key pass' + (e.xa ? ' · ' + e.xa.toFixed(2) + ' xA' : '') : 'Progressive pass', strong: true }, { v: matchLabel(m, DB.players[pid].team) + ' · ' + Math.floor(e.t / 60 + 1) + "'" }]);
+      p.marks.append(g);
+    } else if (mode === 'carry' && e.type === 'carry' && progressive(e.x, e.y, e.ex, e.ey)) {
+      const g = sv('g');
+      g.append(sv('line', { x1: e.x, y1: e.y, x2: e.ex, y2: e.ey, stroke: color, 'stroke-width': 0.5, 'stroke-dasharray': '1 0.8' }));
+      g.append(sv('circle', { cx: e.ex, cy: e.ey, r: 0.8, fill: color }));
+      hover(g, () => [{ v: 'Progressive carry', strong: true }, { v: matchLabel(m, DB.players[pid].team) }]);
+      p.marks.append(g);
+    } else if (mode === 'def' && (e.type in DEF_TYPES)) {
+      const c = sv('circle', { cx: e.x, cy: e.y, r: 1.2, fill: color, 'fill-opacity': 0.8, stroke: surf, 'stroke-width': 0.3 });
+      hover(c, () => [{ v: e.type[0].toUpperCase() + e.type.slice(1), strong: true }, { v: matchLabel(m, DB.players[pid].team) }]);
+      p.marks.append(c);
+    }
+  }));
+  return p.svg;
+}
+function playerProfile(pid, ms) {
+  const p = DB.players[pid], a = aggPlayer(ms, pid), A = css('--team-a');
+  const shots = [];
+  ms.forEach((m) => m.events.forEach((e) => e.type === 'shot' && e.pl === pid && shots.push({ e, m })));
+  const head = h('div', { class: 'profile-h' }, h('h2', { text: p.name }),
+    h('span', { class: 'sub', text: `${p.num != null ? '#' + p.num + ' · ' : ''}${GROUP_NAME[p.group]}${p.role ? ' (' + p.role + ')' : ''} · ${teamName(p.team)}` }));
+  const stats = h('div', { class: 'statline' }, [[a.min, 'Minutes'], [a.st, 'Starts'], [a.g, 'Goals'], [a.xg.toFixed(1), 'xG'], [a.ast, 'Assists'], [a.xa.toFixed(1), 'xA'], [fmt(100 * safe(a.pc, a.pa), 0) + '%', 'Pass completion'], [a.tkl + a.int, 'Tackles + int']].map(([v, l]) => h('div', null, h('b', { text: v }), h('span', { text: l }))));
+  const hm = heatmap(ms, p.team, 'all', A, pid);
+  const grid = h('div', { class: 'grid three' });
+  grid.append(h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '6px' }, text: 'Heatmap · ' + hm.n + ' events' }), hm.el));
+  grid.append(h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '6px' }, text: 'Percentile vs league ' + GROUP_NAME[p.group].toLowerCase() + 's · per 90' }), pctBars([pid], [A])));
+  const modes = [['pass', 'Passes'], ['carry', 'Carries'], ['shots', 'Shots'], ['def', 'Defending']];
+  const am = h('div', null, h('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '6px' } }, h('div', { class: 'eyebrow', text: 'Action map' }), seg(modes, S.act, (v) => { S.act = v; render(); }, 'Action map')));
+  if (S.act === 'shots') { am.append(shotMap(shots.map((x) => ({ e: x.e })), A, { full: false, matchOf: (e) => matchLabel(shots.find((s) => s.e === e).m, p.team) })); am.append(shotLegend(A)); }
+  else {
+    am.append(actionMap(ms, pid, S.act, A));
+    if (S.act === 'pass') am.append(legend([['Progressive pass', A, 'line'], ['Key pass', css('--c4'), 'line']]));
+  }
+  grid.append(am);
+  return card({ title: 'Player profile', span: true }, rangeLabel(), head, stats, grid);
+}
+
+/* ---------- Compare ---------- */
+function viewCompare(el) {
+  el.append(h('div', { style: { marginBottom: '14px' } }, seg([['teams', 'Teams'], ['players', 'Players']], S.cmpMode, (v) => { S.cmpMode = v; render(); }, 'Compare')));
+  if (S.cmpMode === 'players') return comparePlayers(el);
+  const A = S.team, B = S.cmp, colA = css('--team-a'), colB = css('--team-b');
+  const msA = scoped(A, leagueRange()), msB = scoped(B, leagueRange());
+  const aA = teamAgg(A, leagueRange()), aB = teamAgg(B, leagueRange());
+  const pickB = h('select', { id: 'cmp-b', onchange: (e) => { S.cmp = e.target.value; render(); } }, DB.teams.filter((t) => t.id !== A).map((t) => h('option', { value: t.id, selected: t.id === B, text: t.name })));
+  el.append(h('div', { class: 'hero' }, h('h1', null, h('span', { style: { color: colA }, text: teamName(A) }), h('span', { style: { color: 'var(--muted)' }, text: ' v ' }), h('span', { style: { color: colB }, text: teamName(B) })),
+    h('div', { class: 'meta' }, h('div', { class: 'field' }, h('label', { for: 'cmp-b', text: 'Compare with' }), pickB), h('span', { class: 'sub', text: { season: 'Season to date', last5: 'Last 5 matches each', last3: 'Last 3 matches each' }[leagueRange()] }))));
+  const grid = h('div', { class: 'grid' });
+  el.append(grid);
+  const keys = ['ppg', 'xg', 'xga', 'npxg', 'sh', 'xgsh', 'boxe', 'spxg', 'poss', 'pass', 'ppp', 'direct', 'prog', 'tilt', 'ppda', 'height', 'hto', 'duel'];
+  grid.append(card('Head to head', 'Per-match averages · bars scaled to the league maximum · bold marks the better side', butterfly(teamName(A), teamName(B), keys.map((k) => TM[k]), aA, aB, colA, colB)));
+  grid.append(card('Game states', 'Share of ball-in-play time', h('div', { class: 'twin' },
+    [[A, aA], [B, aB]].map(([T, a], i) => h('div', null, h('h3', null, h('span', { class: 'swatch', style: { background: i ? colB : colA } }), teamName(T)), phaseBlock(a, true))))));
+  const pnA = passNetwork(msA, A, colA), pnB = passNetwork(msB, B, colB);
+  const fl = (pn) => pn.forms.map(([f, c]) => f + ' (' + c + ')').join(', ');
+  grid.append(card({ title: 'Shape & passing network', span: true }, 'Most-used XI at average positions, both attacking left to right', h('div', { class: 'twin' },
+    h('div', null, h('h3', null, h('span', { class: 'swatch', style: { background: colA } }), teamName(A), h('span', { class: 'sub', text: fl(pnA) })), pnA.el),
+    h('div', null, h('h3', null, h('span', { class: 'swatch', style: { background: colB } }), teamName(B), h('span', { class: 'sub', text: fl(pnB) })), pnB.el))));
+  const hA = heatmap(msA, A, S.heat, colA), hB = heatmap(msB, B, S.heat, colB);
+  const pA = teamPoints(msA, A, S.heat), pB = teamPoints(msB, B, S.heat);
+  const dp = pitch();
+  dp.heat.append(diffImage(density(pA), density(pB), colA, colB));
+  grid.append(card({ title: 'Where they play', span: true, tools: seg(HEAT_MODES, S.heat, (v) => { S.heat = v; render(); }, 'Heatmap type') }, 'Touch maps and the difference between them', h('div', { class: 'twin' },
+    h('div', null, h('h3', null, h('span', { class: 'swatch', style: { background: colA } }), teamName(A)), hA.el),
+    h('div', null, h('h3', null, h('span', { class: 'swatch', style: { background: colB } }), teamName(B)), hB.el),
+    h('div', null, h('h3', { text: 'Difference' }), dp.svg, legend([['More ' + teamName(A), colA], ['More ' + teamName(B), colB]])))));
+  const sA = collectShots(msA, A), sB = collectShots(msB, B);
+  grid.append(card({ title: 'Shot maps', span: true }, 'Shots for, all matches in range', h('div', { class: 'twin' },
+    h('div', null, h('h3', null, h('span', { class: 'swatch', style: { background: colA } }), teamName(A), h('span', { class: 'sub', text: sA.length + ' shots · ' + sA.reduce((s, x) => s + x.e.xg, 0).toFixed(1) + ' xG' })), shotMap(sA, colA, { matchOf: (e) => matchLabel(sA.find((s) => s.e === e).m, A) })),
+    h('div', null, h('h3', null, h('span', { class: 'swatch', style: { background: colB } }), teamName(B), h('span', { class: 'sub', text: sB.length + ' shots · ' + sB.reduce((s, x) => s + x.e.xg, 0).toFixed(1) + ' xG' })), shotMap(sB, colB, { matchOf: (e) => matchLabel(sB.find((s) => s.e === e).m, B) })))));
+}
+function butterfly(nameA, nameB, metrics, aA, aB, colA, colB) {
+  const L = leagueAggs();
+  return h('div', null, h('div', { class: 'fly-head' }, h('div', { style: { color: colA } , text: nameA }), h('div'), h('div', { style: { color: colB }, text: nameB })),
+    h('div', { class: 'fly' }, metrics.map((mt) => {
+      const va = mt.f(aA), vb = mt.f(aB);
+      const mx = Math.max(va, vb, ...L.map((r) => mt.f(r.a))) || 1;
+      const better = mt.dir === 0 ? 0 : (va - vb) * mt.dir;
+      const side = (v, c, cls, win) => h('div', { class: 'fly-side ' + cls }, h('div', { class: 'trk' }, h('div', { class: 'b', style: { width: clamp((100 * v) / mx, 0, 100) + '%', background: c } })), h('span', { class: 'v' + (win ? ' win' : ''), text: fmt(v, mt.d) }));
+      const row = h('div', { class: 'fly-row', tabindex: 0 }, side(va, colA, 'l', better > 0), h('div', { class: 'lab', text: mt.l + (mt.u && mt.u !== '/match' ? ' (' + mt.u + ')' : '') }), side(vb, colB, 'r', better < 0));
+      hover(row, () => [{ v: mt.l, strong: true }, { color: colA, v: fmt(va, mt.d), l: nameA }, { color: colB, v: fmt(vb, mt.d), l: nameB }, mt.tip ? { v: mt.tip } : null, mt.dir === 0 ? { v: 'Style metric · neither side is better' } : null].filter(Boolean));
+      return row;
+    })));
+}
+function comparePlayers(el) {
+  const colA = css('--team-a'), colB = css('--team-b');
+  const eligible = Object.values(DB.players).filter((p) => p.group !== 'GK' || true);
+  const mins = {};
+  eligible.forEach((p) => (mins[p.id] = aggPlayer(scoped(p.team, leagueRange()), p.id).min));
+  const pool = eligible.filter((p) => mins[p.id] >= 90);
+  if (pool.length < 2) { el.append(h('p', { class: 'empty', text: 'Not enough players with 90+ minutes to compare.' })); return; }
+  if (!S.pA || !DB.players[S.pA]) { const own = pool.filter((p) => p.team === S.team).sort((a, b) => mins[b.id] - mins[a.id]); S.pA = (own.find((p) => p.group === 'FWD') || own[0] || pool[0]).id; }
+  if (!S.pB || !DB.players[S.pB] || S.pB === S.pA) { const g = DB.players[S.pA].group; const o = pool.filter((p) => p.group === g && p.team !== DB.players[S.pA].team).sort((a, b) => mins[b.id] - mins[a.id]); S.pB = (o[0] || pool.find((p) => p.id !== S.pA)).id; }
+  const sel = (id, val, on) => h('select', { id, onchange: (e) => on(e.target.value) }, DB.teams.map((t) => h('optgroup', { label: t.name }, pool.filter((p) => p.team === t.id).sort((a, b) => a.name.localeCompare(b.name)).map((p) => h('option', { value: p.id, selected: p.id === val, text: `${p.name} · ${p.role || p.group}` })))));
+  el.append(h('div', { class: 'hero' }, h('div', { class: 'meta' },
+    h('div', { class: 'field' }, h('label', { for: 'pa', text: 'Player A' }), sel('pa', S.pA, (v) => { S.pA = v; render(); })),
+    h('div', { class: 'field' }, h('label', { for: 'pb', text: 'Player B' }), sel('pb', S.pB, (v) => { S.pB = v; render(); })),
+    h('span', { class: 'sub', text: 'Players with 90+ minutes · ' + { season: 'season to date', last5: 'last 5 team matches', last3: 'last 3 team matches' }[leagueRange()] }))));
+  const pA = DB.players[S.pA], pB = DB.players[S.pB];
+  const aA = aggPlayer(scoped(pA.team, leagueRange()), pA.id), aB = aggPlayer(scoped(pB.team, leagueRange()), pB.id);
+  const grid = h('div', { class: 'grid' });
+  el.append(grid);
+  const nameLine = (p, c, a) => h('h3', null, h('span', { class: 'swatch', style: { background: c } }), p.name, h('span', { class: 'sub', text: `${teamName(p.team)} · ${p.role || p.group} · ${a.min} min` }));
+  const note = pA.group !== pB.group ? 'Different positions: each player is ranked against their own position group, using ' + GROUP_NAME[pA.group].toLowerCase() + ' metrics.' : 'Percentile against league ' + GROUP_NAME[pA.group].toLowerCase() + 's, per 90 minutes';
+  grid.append(card('Percentile profile', note, h('div', { style: { marginBottom: '10px' } }, nameLine(pA, colA, aA), nameLine(pB, colB, aB)), pctBars([pA.id, pB.id], [colA, colB])));
+  const rows = PLAYER_METRICS.map((mt) => ({ mt, a: playerValue(mt, aA, true), b: playerValue(mt, aB, true) }));
+  grid.append(card('Per 90 numbers', 'All tracked metrics', h('div', { class: 'tbl-wrap' }, h('table', null, h('thead', null, h('tr', null, h('th', { class: 'l', text: 'Metric' }), h('th', { text: pA.name.split(' ').pop(), style: { color: colA } }), h('th', { text: pB.name.split(' ').pop(), style: { color: colB } }))),
+    h('tbody', null, rows.map((r) => h('tr', { style: { cursor: 'default' } }, h('td', { class: 'l', text: r.mt.l + (r.mt.p90 ? ' /90' : '') }), h('td', { style: { fontWeight: r.a > r.b ? 700 : 400 }, text: fmt(r.a, r.mt.d) }), h('td', { style: { fontWeight: r.b > r.a ? 700 : 400 }, text: fmt(r.b, r.mt.d) }))))))));
+  const hA = heatmap(scoped(pA.team, leagueRange()), pA.team, 'all', colA, pA.id), hB = heatmap(scoped(pB.team, leagueRange()), pB.team, 'all', colB, pB.id);
+  grid.append(card({ title: 'Heatmaps', span: true }, 'All touches, attacking left to right', h('div', { class: 'twin' }, h('div', null, nameLine(pA, colA, aA), hA.el), h('div', null, nameLine(pB, colB, aB), hB.el))));
+}
+
+/* ---------- Matches ---------- */
+function viewMatches(el) {
+  const T = S.team, ms = teamMatches(T);
+  if (!ms.length) { el.append(h('p', { class: 'empty', text: 'No matches for this filter.' })); return; }
+  if (!S.match || !ms.find((m) => m.id === S.match)) S.match = (S.range.startsWith('m:') && ms.find((m) => m.id === S.range.slice(2)) ? S.range.slice(2) : ms[ms.length - 1].id);
+  const grid = h('div', { class: 'grid', style: { gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))' } });
+  el.append(grid);
+  const list = h('div', { class: 'mlist' }, ms.slice().reverse().map((m) => {
+    const r = result(m, T);
+    return h('button', { type: 'button', class: 'mrow', 'aria-current': String(m.id === S.match), onclick: () => { S.match = m.id; render(); } },
+      h('span', { class: 'd', text: (m.date ? fmtDate(m.date) : '') + ' · R' + m.round }), h('span', { class: 'res ' + r, text: r }),
+      h('span', null, (m.home === T ? 'v ' : '@ ') + teamName(oppOf(m, T))), h('span', { class: 'score', text: goalsFor(m, T) + '–' + goalsAg(m, T) }),
+      h('span', { class: 'xg', text: m.ts[T].xg.toFixed(1) + ' – ' + m.ts[T].xga.toFixed(1) + ' xG' }));
+  }));
+  const report = matchReport(DB.matches.find((m) => m.id === S.match), T);
+  grid.append(report, card('Results', teamName(T) + ' · newest first', list));
+}
+function matchReport(m, T) {
+  const O = oppOf(m, T), colA = css('--team-a'), colB = css('--team-b');
+  const home = m.home, away = m.away;
+  const wrap = h('section', { class: 'card span' });
+  wrap.append(h('div', { class: 'eyebrow', text: `Round ${m.round}${m.date ? ' · ' + fmtDate(m.date) : ''}` }));
+  const colOf = (id) => (id === T ? colA : colB);
+  wrap.append(h('div', { class: 'scoreboard' },
+    h('div', null, h('div', { class: 'tn', style: { color: colOf(home) }, text: teamName(home) }), h('div', { class: 'xgs', text: (m.forms[home] || '') + ' · ' + m.ts[home].xg.toFixed(2) + ' xG' })),
+    h('div', { class: 'sc', text: m.hg + '–' + m.ag }),
+    h('div', null, h('div', { class: 'tn r', style: { color: colOf(away) }, text: teamName(away) }), h('div', { class: 'xgs', style: { textAlign: 'right' }, text: m.ts[away].xg.toFixed(2) + ' xG · ' + (m.forms[away] || '') }))));
+  const scorers = (id) => m.events.filter((e) => e.type === 'shot' && e.out === 'goal' && e.team === id).map((e) => DB.players[e.pl].name.split(' ').pop() + ' ' + Math.floor(e.t / 60 + 1) + "'" + (e.sp === 'pen' ? ' (p)' : '')).join(', ');
+  wrap.append(h('div', { class: 'scoreboard', style: { marginBottom: '16px' } }, h('div', { class: 'sub', text: scorers(home) }), h('div'), h('div', { class: 'sub', style: { textAlign: 'right' }, text: scorers(away) })));
+  const grid = h('div', { class: 'grid' });
+  wrap.append(grid);
+  // momentum
+  const mom = h('div');
+  grid.append(h('div', null, h('div', { class: 'eyebrow', text: 'xG race · cumulative by minute' }), mom, legend([[teamName(T), colA, 'line'], [teamName(O), colB, 'line']])));
+  requestAnimationFrame(() => xgRace(mom, m, T, O, colA, colB));
+  // shot map full pitch
+  const shots = m.events.filter((e) => e.type === 'shot').map((e) => ({ e, mirror: e.team !== T, col: e.team === T ? colA : colB }));
+  grid.append(h('div', null, h('div', { class: 'eyebrow', text: `Shot map · ${teamName(T)} attacking right` }), shotMap(shots, colA, { full: true }), shotLegend(css('--ink-2'))));
+  // stats
+  const aT = m.ts[T], aO = m.ts[O];
+  grid.append(h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '8px' }, text: 'Match stats' }), butterfly(teamName(T), teamName(O), ['xg', 'sh', 'sot', 'xgsh', 'poss', 'pass', 'prog', 'f3e', 'boxe', 'tilt', 'ppda', 'height', 'hto', 'duel'].map((k) => TM[k]), aT, aO, colA, colB)));
+  grid.append(h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '8px' }, text: 'Game states' }), h('div', { class: 'twin' }, [[T, aT, colA], [O, aO, colB]].map(([id, a, c]) => h('div', null, h('h3', null, h('span', { class: 'swatch', style: { background: c } }), teamName(id)), phaseBlock(a, true))))));
+  const pnT = passNetwork([m], T, colA), pnO = passNetwork([m], O, colB);
+  grid.append(h('div', { style: { gridColumn: '1 / -1' } }, h('div', { class: 'eyebrow', style: { marginBottom: '8px' }, text: 'Passing networks · starting XIs, both attacking right' }), h('div', { class: 'twin' },
+    h('div', null, h('h3', null, h('span', { class: 'swatch', style: { background: colA } }), teamName(T), h('span', { class: 'sub', text: m.forms[T] || '' })), pnT.el),
+    h('div', null, h('h3', null, h('span', { class: 'swatch', style: { background: colB } }), teamName(O), h('span', { class: 'sub', text: m.forms[O] || '' })), pnO.el))));
+  return wrap;
+}
+function xgRace(box, m, T, O, colA, colB) {
+  const W = Math.max(280, box.clientWidth || 500), H = 210, mg = { l: 30, r: 12, t: 12, b: 24 };
+  const endMin = Math.max(95, ...m.events.map((e) => Math.ceil(e.t / 60) + 1));
+  const series = [T, O].map((id) => {
+    let c = 0;
+    const pts = [[0, 0]];
+    m.events.filter((e) => e.type === 'shot' && e.team === id).forEach((e) => { const mn = e.t / 60; pts.push([mn, c]); c += e.xg; pts.push([mn, c, e]); });
+    pts.push([endMin, c]);
+    return { id, pts, total: c };
+  });
+  const top = Math.max(1, Math.ceil(Math.max(...series.map((s) => s.total)) * 2) / 2);
+  const X = (v) => mg.l + ((W - mg.l - mg.r) * v) / endMin, Y = (v) => mg.t + (H - mg.t - mg.b) * (1 - v / top);
+  const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%' });
+  const ax = sv('g', { class: 'axis' });
+  const st = top > 2 ? 1 : 0.5;
+  for (let v = 0; v <= top + 1e-9; v += st) { ax.append(sv('line', { x1: mg.l, x2: W - mg.r, y1: Y(v), y2: Y(v), class: v ? 'grid-line' : 'baseline' })); ax.append(sv('text', { x: mg.l - 6, y: Y(v) + 4, 'text-anchor': 'end', text: v.toFixed(v % 1 ? 1 : 0) })); }
+  [0, 15, 30, 45, 60, 75, 90].forEach((mn) => ax.append(sv('text', { x: X(mn), y: H - 6, 'text-anchor': 'middle', text: mn + "'" })));
+  ax.append(sv('line', { x1: X(45), x2: X(45), y1: mg.t, y2: H - mg.b, class: 'grid-line', 'stroke-dasharray': '3 3' }));
+  svg.append(ax);
+  series.forEach((s, i) => {
+    const c = i ? colB : colA;
+    svg.append(sv('path', { d: s.pts.map((p, k) => (k ? 'L' : 'M') + X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1)).join(''), fill: 'none', stroke: c, 'stroke-width': 2, 'stroke-linejoin': 'round' }));
+    s.pts.filter((p) => p[2]).forEach((p) => {
+      const e = p[2], goal = e.out === 'goal';
+      const dot = sv('circle', { cx: X(p[0]), cy: Y(p[1]), r: goal ? 5 : 2.5, fill: goal ? c : css('--surface'), stroke: goal ? css('--surface') : c, 'stroke-width': goal ? 2 : 1.5 });
+      hover(dot, () => [{ v: (goal ? 'Goal · ' : '') + e.xg.toFixed(2) + ' xG', strong: true }, { v: DB.players[e.pl].name + ' · ' + Math.floor(e.t / 60 + 1) + "'" }, { v: teamName(s.id) + ' total ' + p[1].toFixed(2) + ' xG' }]);
+      svg.append(dot);
+    });
+    svg.append(sv('text', { x: W - mg.r, y: Y(s.total) - 6, 'text-anchor': 'end', class: 'lbl', text: s.total.toFixed(2) }));
+  });
+  box.append(svg);
+}
+
+/* ---------- Data ---------- */
+function viewData(el) {
+  const status = h('div', { class: 'status', role: 'status' });
+  const input = h('input', { type: 'file', id: 'file', accept: '.json,application/json', multiple: true, hidden: true, onchange: (e) => load(e.target.files) });
+  const drop = h('div', { class: 'drop' },
+    h('p', { style: { margin: '0 0 10px' } }, 'Drop StatsBomb event files here (one ', h('code', { text: '<match_id>.json' }), ' per match), plus the competition’s ', h('code', { text: 'matches.json' }), ' for dates and home/away.'),
+    h('button', { class: 'btn', type: 'button', onclick: () => input.click(), text: 'Choose files' }), input);
+  ['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', (e) => load(e.dataTransfer.files));
+  async function load(fileList) {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    status.className = 'status';
+    status.textContent = 'Reading ' + files.length + ' file' + (files.length > 1 ? 's' : '') + '…';
+    try {
+      const parsed = await Promise.all(files.map(async (f) => ({ name: f.name, data: JSON.parse(await f.text()) })));
+      const { db, errors } = importStatsBomb(parsed);
+      if (!db.matches.length) { status.className = 'status err'; status.textContent = 'No matches found. Each event file must be a StatsBomb events array that includes the two "Starting XI" events.'; return; }
+      DB = prepareDB(db);
+      cache.clear();
+      const counts = {};
+      DB.matches.forEach((m) => [m.home, m.away].forEach((t) => (counts[t] = (counts[t] || 0) + 1)));
+      S.team = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+      S.cmp = (DB.teams.find((t) => t.id !== S.team) || DB.teams[0]).id;
+      S.range = 'season'; S.player = null; S.match = null; S.pA = null; S.pB = null;
+      S.tab = 'overview';
+      render();
+    } catch (err) {
+      status.className = 'status err';
+      status.textContent = 'Could not read the files: ' + err.message + '. Check they are StatsBomb JSON exports.';
+    }
+  }
+  const prose = h('div', { class: 'prose' },
+    h('p', null, 'Every chart in Touchline Lab is computed from match events (passes, carries, shots, tackles and so on) with pitch coordinates. That is what makes heatmaps, passing networks and game states possible. Any data with that shape can drive the app.'),
+    h('h3', { text: 'What you are looking at now' }),
+    DB.source === 'demo'
+      ? h('p', null, 'A synthetic 12-team season to date (12 rounds, 72 matches, about 1,600 events per match). Club names are real; players, results and every number are generated by a seeded simulation with different style settings per club (pressing height, directness, width, formation). Use it to explore the tools, not to judge real teams.')
+      : h('p', null, `${DB.label}: ${DB.matches.length} matches, ${DB.teams.length} teams. Team rankings and player percentiles compare only within these matches.`),
+    h('h3', { text: 'Getting real Aberdeen data' }),
+    h('ul', null,
+      h('li', null, h('b', { text: 'Event data for the Scottish Premiership' }), ' (needed for heatmaps and passing networks) comes from commercial providers such as Hudl StatsBomb, Opta (Stats Perform) and Wyscout. Clubs and media usually license it. If you can get StatsBomb-format exports, drop them in below.'),
+      h('li', null, h('b', { text: 'Free practice data: ' }), h('a', { href: 'https://github.com/statsbomb/open-data', target: '_blank', rel: 'noopener', text: 'StatsBomb Open Data' }), ' on GitHub has full event data for selected competitions (World Cups, Euros, some league seasons). The Scottish Premiership is not included, but it is the quickest way to load real matches here and test team comparisons.'),
+      h('li', null, h('b', { text: 'Team-level numbers only' }), ' (results, xG, possession) are available from public stats sites, but without event coordinates the spatial views stay empty.')));
+  el.append(h('div', { class: 'grid' },
+    card('Data source', DB.label, prose),
+    card('Import StatsBomb data', 'Files stay in your browser. Nothing is uploaded.', drop, status,
+      DB.source !== 'demo' ? h('div', { style: { marginTop: '12px' } }, h('button', { class: 'btn ghost', type: 'button', onclick: () => { DB = DEMO; cache.clear(); S.team = 'ABE'; S.cmp = 'CEL'; S.range = 'season'; S.player = null; S.match = null; S.pA = S.pB = null; render(); }, text: 'Back to demo season' })) : null,
+      h('p', { class: 'note', text: 'Tip: in the open-data repository, events live in data/events/ and fixtures in data/matches/<competition_id>/<season_id>.json. Load several matches from one competition to unlock league tables and rankings.' }))));
+}
+
+/* ---------- Boot ---------- */
+function boot() {
+  buildShell();
+  const loading = h('p', { class: 'empty', text: 'Generating demo season…' });
+  mainEl.append(loading);
+  setTimeout(() => {
+    DEMO = DB = prepareDB(buildDemo());
+    const hash = (location.hash || '').slice(1);
+    if (TABS.some(([k]) => k === hash)) S.tab = hash;
+    render();
+  }, 20);
+  let rt, lastW = window.innerWidth;
+  window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { if (DB && Math.abs(window.innerWidth - lastW) > 40) { lastW = window.innerWidth; const y = window.scrollY; render(); window.scrollTo(0, y); } }, 250); });
+  const rerender = () => DB && render();
+  try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', rerender); } catch (e) {}
+  new MutationObserver(rerender).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+}
+boot();
