@@ -553,12 +553,12 @@ function progressive(x, y, ex, ey) {
 }
 
 function blankTeam() {
-  const o = { n: 0, w: 0, d: 0, l: 0, pts: 0, g: 0, ga: 0, xg: 0, xga: 0, npxg: 0, npxga: 0, sh: 0, sha: 0, sot: 0, pa: 0, pc: 0, posT: 0, oposT: 0, ppdaPass: 0, ppdaDef: 0, f3p: 0, of3p: 0, prog: 0, f3e: 0, boxe: 0, cross: 0, spxg: 0, hto: 0, defX: 0, defN: 0, fwd: 0, dist: 0, poss: 0, possMid: 0, possF3: 0, possBox: 0, possShot: 0, possGoal: 0, duel: 0, duelW: 0, tkl: 0, int: 0, rec: 0, drb: 0, drbW: 0, trSh: 0, trXg: 0, ph: {}, oph: {} };
+  const o = { n: 0, w: 0, d: 0, l: 0, pts: 0, g: 0, ga: 0, xg: 0, xga: 0, npxg: 0, npxga: 0, sh: 0, sha: 0, sot: 0, pa: 0, pc: 0, posT: 0, oposT: 0, ppdaPass: 0, ppdaDef: 0, f3p: 0, of3p: 0, prog: 0, f3e: 0, boxe: 0, cross: 0, spxg: 0, hto: 0, defX: 0, defN: 0, fwd: 0, dist: 0, poss: 0, possMid: 0, possF3: 0, possBox: 0, possShot: 0, possGoal: 0, duel: 0, duelW: 0, tkl: 0, int: 0, rec: 0, drb: 0, drbW: 0, trSh: 0, trXg: 0, cor: 0, fls: 0, yc: 0, shIn: 0, ph: {}, oph: {} };
   PHASES.forEach((k) => { o.ph[k] = 0; o.oph[k] = 0; });
   return o;
 }
 function blankPlayer() {
-  return { n: 0, min: 0, st: 0, touch: 0, boxT: 0, pa: 0, pc: 0, prog: 0, progC: 0, f3e: 0, key: 0, ast: 0, xa: 0, cross: 0, sh: 0, sot: 0, g: 0, xg: 0, npxg: 0, drb: 0, drbW: 0, tkl: 0, int: 0, rec: 0, clr: 0, fls: 0, duel: 0, duelW: 0, ca: 0 };
+  return { n: 0, min: 0, st: 0, touch: 0, boxT: 0, pa: 0, pc: 0, prog: 0, progC: 0, f3e: 0, key: 0, ast: 0, xa: 0, cross: 0, sh: 0, sot: 0, g: 0, xg: 0, npxg: 0, drb: 0, drbW: 0, tkl: 0, int: 0, rec: 0, clr: 0, fls: 0, duel: 0, duelW: 0, ca: 0, rt: 0, rtN: 0 };
 }
 function phaseOf(e, p, team) {
   const x = e.team === team ? e.x : PL - e.x;
@@ -614,11 +614,13 @@ function prepareMatch(m) {
           }
           if (e.x >= 80) s.f3p++;
           if (e.cross) s.cross++;
+          if (e.sp === 'corner') s.cor++;
         } else if (e.type === 'carry') {
           if (e.x < 80 && e.ex >= 80) s.f3e++;
           if (!inBox(e.x, e.y) && inBox(e.ex, e.ey)) s.boxe++;
         } else if (e.type === 'shot') {
           s.sh++; s.xg += e.xg;
+          if (inBox(e.x, e.y)) s.shIn++;
           if (e.sp !== 'pen') s.npxg += e.xg;
           if (e.out === 'goal' || e.out === 'saved') s.sot++;
           if (e.sp) s.spxg += e.xg;
@@ -634,6 +636,7 @@ function prepareMatch(m) {
           if ((e.type === 'tackle' || e.type === 'interception' || e.type === 'recovery') && e.x >= 76) s.hto++;
         }
         if (PPDA_TYPES[e.type] && e.x >= 48) s.ppdaDef++;
+        if (e.type === 'foul') s.fls++;
       } else if (e.team === O) {
         if (e.type === 'pass' && e.sp !== 'throw') {
           if (e.x <= 72) s.ppdaPass++;
@@ -653,6 +656,7 @@ function prepareMatch(m) {
       if (p.shot) s.possShot++;
       if (p.goal) s.possGoal++;
     });
+    s.yc = NaN; // cards are not in the event model
     m.ts[T] = s;
   });
   // players
@@ -704,7 +708,7 @@ function prepareMatch(m) {
 
 function addInto(a, b) {
   for (const k in b) {
-    if (typeof b[k] === 'number') a[k] = (a[k] || 0) + b[k];
+    if (typeof b[k] === 'number') a[k] = Number.isNaN(a[k]) ? NaN : (a[k] || 0) + b[k]; // a missing stat stays missing
     else if (b[k] && typeof b[k] === 'object') { a[k] = a[k] || {}; for (const j in b[k]) a[k][j] = (a[k][j] || 0) + b[k][j]; }
   }
   return a;
@@ -712,7 +716,9 @@ function addInto(a, b) {
 function aggTeam(matches, T) { const a = blankTeam(); a.n = 0; matches.forEach((m) => m.ts[T] && addInto(a, m.ts[T])); return a; }
 function aggPlayer(matches, pid) { const a = blankPlayer(); matches.forEach((m) => m.ps[pid] && addInto(a, m.ps[pid])); return a; }
 
-const safe = (a, b) => (b ? a / b : 0);
+// NaN marks a stat the data source does not provide; it propagates so the UI can hide it.
+const safe = (a, b) => (Number.isNaN(a) || Number.isNaN(b) ? NaN : b ? a / b : 0);
+const has = (v) => v != null && Number.isFinite(v);
 /* Team metric catalogue. dir: 1 higher is better, -1 lower is better, 0 neutral (style) */
 const TEAM_METRICS = [
   { k: 'ppg', l: 'Points per game', f: (a) => safe(a.pts, a.n), d: 2, dir: 1, grp: 'Results' },
@@ -740,6 +746,10 @@ const TEAM_METRICS = [
   { k: 'prog', l: 'Progressive passes', u: '/match', f: (a) => safe(a.prog, a.n), d: 1, dir: 1, grp: 'Style' },
   { k: 'f3e', l: 'Final-third entries', u: '/match', f: (a) => safe(a.f3e, a.n), d: 1, dir: 1, grp: 'Style' },
   { k: 'cross', l: 'Crosses', u: '/match', f: (a) => safe(a.cross, a.n), d: 1, dir: 0, grp: 'Style' },
+  { k: 'shIn', l: 'Shots from inside the box', u: '%', f: (a) => 100 * safe(a.shIn, a.sh), d: 0, dir: 1, grp: 'Attack' },
+  { k: 'cor', l: 'Corners', u: '/match', f: (a) => safe(a.cor, a.n), d: 1, dir: 1, grp: 'Attack' },
+  { k: 'fls', l: 'Fouls committed', u: '/match', f: (a) => safe(a.fls, a.n), d: 1, dir: 0, grp: 'Defence' },
+  { k: 'yc', l: 'Yellow cards', u: '/match', f: (a) => safe(a.yc, a.n), d: 2, dir: -1, grp: 'Defence' },
   { k: 'possShot', l: 'Possessions ending in a shot', u: '%', f: (a) => 100 * safe(a.possShot, a.poss), d: 1, dir: 1, grp: 'Style' },
 ];
 const PLAYER_METRICS = [
@@ -763,12 +773,15 @@ const PLAYER_METRICS = [
   { k: 'clr', l: 'Clearances', f: (a) => a.clr, p90: true, d: 2 },
   { k: 'duel', l: 'Duels won %', f: (a) => 100 * safe(a.duelW, a.duel), d: 0 },
   { k: 'touch', l: 'Touches', f: (a) => a.touch, p90: true, d: 1 },
+  { k: 'fls', l: 'Fouls committed', f: (a) => a.fls, p90: true, d: 2 },
+  { k: 'rating', l: 'Average match rating', f: (a) => (a.rtN ? a.rt / a.rtN : NaN), d: 2 },
 ];
 function playerValue(mt, a, per90) { const v = mt.f(a); return per90 && mt.p90 ? safe(v * 90, a.min) : v; }
 
 /* ---------- Database prep & selectors ---------- */
 function prepareDB(db) {
-  db.matches.forEach(prepareMatch);
+  db.matches.forEach((m) => { if (!m.ts) prepareMatch(m); }); // stats-only sources arrive with ts/ps already built
+  db.hasEvents = db.matches.some((m) => m.events && m.events.length);
   db.teamById = {};
   db.teams.forEach((t) => (db.teamById[t.id] = t));
   db.teams.sort((a, b) => a.name.localeCompare(b.name));

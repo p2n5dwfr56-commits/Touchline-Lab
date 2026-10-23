@@ -11,9 +11,28 @@ After editing anything in `src/`, run `./build.sh` to rebuild `dist/index.html`.
 - `src/engine.js` – data model, demo-season simulator, StatsBomb importer, all metrics
 - `src/ui.js` – views and charts (plain JS + SVG, no libraries)
 - `src/tactics.js` – Tactics tab: formations, tactical line-up board, shape numbers
+- `src/apifootball.js` – API-Football importer (match/player stats, line-ups, formations)
+- `tools/fetch-api-football.mjs` – downloads a season from API-Football into one file
 - `src/style.css`, `src/head.html` – styling and page head
 
 ## Data
-Everything is computed from match events with pitch coordinates (StatsBomb layout: 120 x 80 yards,
-each team attacking left to right). The built-in season is synthetic. Load real StatsBomb event
-files (plus the competition's matches.json) from the Data tab.
+The built-in season is synthetic. Two kinds of real data can be loaded from the Data tab:
+
+**StatsBomb event data** (every pass, shot and tackle with pitch coordinates, 120 x 80 yards,
+each team attacking left to right). Drives every view, including heatmaps and passing networks.
+Drop the event files plus the competition's matches.json.
+
+**API-Football** (results, line-ups, formations, team and player match stats, xG where the feed
+has it; no pitch coordinates). Covers the Scottish Premiership, so this is the route to real
+Aberdeen data. Pitch maps stay empty with this source.
+
+```sh
+# Node 18+, free key from https://dashboard.api-football.com
+API_FOOTBALL_KEY=your_key node tools/fetch-api-football.mjs --season 2025   # 2025 = 2025/26
+API_FOOTBALL_KEY=your_key node tools/fetch-api-football.mjs --find "Premiership"  # look up league ids
+```
+
+League 179 (Scottish Premiership) is the default. A full season costs about 12 requests (the free
+plan allows 100 a day). Then drop the saved `api-football-179-<season>.json` into the Data tab.
+If players look mirrored left/right on the Tactics board, flip `AF_GRID_COL1_LEFT` in
+`src/apifootball.js` and rebuild.

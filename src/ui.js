@@ -118,12 +118,16 @@ function leagueAggs() {
 }
 function teamAgg(T, range = S.range) { return memo('ta|' + T + '|' + S.venue + '|' + range, () => aggTeam(scoped(T, range), T)); }
 function rankOf(mt, T) {
-  const rows = leagueAggs().map((r) => ({ id: r.team.id, v: mt.f(r.a) }));
+  const rows = leagueAggs().map((r) => ({ id: r.team.id, v: mt.f(r.a) })).filter((r) => has(r.v));
   const dir = mt.dir === -1 ? 1 : -1;
   rows.sort((a, b) => dir * (a.v - b.v));
   return { rank: rows.findIndex((r) => r.id === T) + 1, of: rows.length, avg: rows.reduce((s, r) => s + r.v, 0) / (rows.length || 1), max: Math.max(...rows.map((r) => r.v)), min: Math.min(...rows.map((r) => r.v)) };
 }
 const TM = Object.fromEntries(TEAM_METRICS.map((m) => [m.k, m]));
+const teamHas = (keys, ...aggs) => keys.filter((k) => aggs.every((a) => has(TM[k].f(a))));
+function eventsNote(title, items) {
+  return card({ title, span: true }, null, h('p', { class: 'note', style: { marginTop: 0 }, text: `${items} need event data with pitch locations (every pass, shot and tackle with where it happened). ${DB.label} has match and player stats, line-ups and formations, but no locations. Load StatsBomb-format event files in the Data tab to see these views.` }));
+}
 
 /* ---------- Pitch ---------- */
 function pitch({ half = false, label = true } = {}) {
@@ -293,7 +297,8 @@ function lineChart(box, { series, labels, tipFor, yFmt = (v) => v.toFixed(1), he
   const W = Math.max(280, box.clientWidth || 600), H = height, m = { l: 34, r: 12, t: 12, b: 26 };
   const n = labels.length;
   const ymax = Math.max(0.5, ...series.flatMap((s) => s.values)) * 1.08;
-  const step = ymax > 4 ? 1 : ymax > 2 ? 0.5 : 0.25;
+  const raw = ymax / 5, mag = Math.pow(10, Math.floor(Math.log10(raw))), r = raw / mag;
+  const step = (r <= 1 ? 1 : r <= 2 ? 2 : r <= 2.5 ? 2.5 : r <= 5 ? 5 : 10) * mag; // about five gridlines
   const top = Math.ceil(ymax / step) * step;
   const X = (i) => m.l + (n <= 1 ? (W - m.l - m.r) / 2 : (i * (W - m.l - m.r)) / (n - 1));
   const Y = (v) => m.t + (H - m.t - m.b) * (1 - v / top);
@@ -416,7 +421,8 @@ function viewOverview(el) {
       h('span', { class: 'form', 'aria-label': 'Last five results' }, form.map((r) => h('span', { class: r, text: r }))),
       h('span', { class: 'sub', text: rangeLabel() + (S.venue !== 'all' ? ' · ' + S.venue : '') }))));
 
-  const kp = [['xg', 'xG for', ''], ['xga', 'xG against', ''], ['poss', 'Possession', '%'], ['ppda', 'PPDA', ''], ['tilt', 'Field tilt', '%'], ['g', 'Goals', '']];
+  const KP = { xg: ['xG for', ''], xga: ['xG against', ''], poss: ['Possession', '%'], ppda: ['PPDA', ''], tilt: ['Field tilt', '%'], g: ['Goals', ''], ga: ['Goals against', ''], sh: ['Shots', ''], pass: ['Pass completion', '%'], sot: ['Shots on target', '%'], cor: ['Corners', ''] };
+  const kp = teamHas(Object.keys(KP), a).slice(0, 6).map((k) => [k, ...KP[k]]);
   el.append(h('div', { class: 'kpis' }, kp.map(([k, l, u]) => {
     const mt = TM[k], v = mt.f(a), rk = rankOf(mt, T);
     const tile = h('div', { class: 'kpi', tabindex: 0 }, h('div', { class: 'eyebrow', text: l + (mt.u === '/match' ? ' / match' : '') }), h('div', { class: 'v' }, fmt(v, k === 'poss' || k === 'tilt' ? 1 : mt.d === 2 ? 2 : 1), u ? h('small', { text: u }) : null),
@@ -428,39 +434,50 @@ function viewOverview(el) {
   const grid = h('div', { class: 'grid' });
   el.append(grid);
   // League table
+  const showXg = table.some((r) => has(r.a.xg));
   const lt = h('table', null,
-    h('thead', null, h('tr', null, ['#', 'Team', 'P', 'W', 'D', 'L', 'GF', 'GA', 'GD', 'Pts', 'xG', 'xGA', 'xGD'].map((c, i) => h('th', { class: i === 1 ? 'l' : '', text: c })))),
+    h('thead', null, h('tr', null, ['#', 'Team', 'P', 'W', 'D', 'L', 'GF', 'GA', 'GD', 'Pts'].concat(showXg ? ['xG', 'xGA', 'xGD'] : []).map((c, i) => h('th', { class: i === 1 ? 'l' : '', text: c })))),
     h('tbody', null, table.map((r) => {
       const t = r.a;
       return h('tr', { class: r.team.id === T ? 'focus' : '', onclick: () => { S.team = r.team.id; if (S.cmp === S.team) S.cmp = T; S.range = 'season'; render(); }, title: 'Show ' + r.team.name },
         h('td', { text: r.pos }), h('td', { class: 'l', text: r.team.name }), h('td', { text: t.n }), h('td', { text: t.w }), h('td', { text: t.d }), h('td', { text: t.l }),
         h('td', { text: t.g }), h('td', { text: t.ga }), h('td', { text: (t.g - t.ga > 0 ? '+' : '') + (t.g - t.ga) }), h('td', null, h('b', { text: t.pts })),
-        h('td', { text: t.xg.toFixed(1) }), h('td', { text: t.xga.toFixed(1) }), h('td', { text: (t.xg - t.xga > 0 ? '+' : '') + (t.xg - t.xga).toFixed(1) }));
+        showXg ? [h('td', { text: fmt(t.xg, 1) }), h('td', { text: fmt(t.xga, 1) }), h('td', { text: (t.xg - t.xga > 0 ? '+' : '') + fmt(t.xg - t.xga, 1) })] : null);
     })));
   grid.append(card('League table', 'All matches · click a row to switch team', h('div', { class: 'tbl-wrap' }, lt)));
 
   // xG trend
-  const trend = card('xG by match', 'Chance quality created and conceded, ' + all.length + ' matches');
+  const useXg = all.every((m) => has(m.ts[T].xg) && has(m.ts[T].xga));
+  const [kF, kA, unit] = useXg ? ['xg', 'xga', 'xG'] : ['sh', 'sha', 'Shots'];
+  const trend = card(useXg ? 'xG by match' : 'Shots by match', (useXg ? 'Chance quality created and conceded, ' : 'Shots taken and faced (no xG in this data), ') + all.length + ' matches');
   grid.append(trend);
   const box = h('div');
   trend.append(box);
   const A = css('--team-a'), B = css('--ink-2');
+  const val = (m, k) => (has(m.ts[T][k]) ? m.ts[T][k] : 0);
   lineChart(box, {
     labels: all.map((m) => 'R' + m.round),
-    series: [{ name: 'xG for', color: A, values: all.map((m) => m.ts[T].xg) }, { name: 'xG against', color: B, dash: '5 4', values: all.map((m) => m.ts[T].xga) }],
+    series: [{ name: unit + ' for', color: A, values: all.map((m) => val(m, kF)) }, { name: unit + ' against', color: B, dash: '5 4', values: all.map((m) => val(m, kA)) }],
     yFmt: (v) => v.toFixed(v % 1 ? 1 : 0),
-    tipFor: (i) => { const m = all[i]; return [{ v: matchLabel(m, T) }, { v: `${result(m, T)} ${goalsFor(m, T)}–${goalsAg(m, T)}`, strong: true }, { color: A, v: m.ts[T].xg.toFixed(2), l: 'xG for' }, { color: B, v: m.ts[T].xga.toFixed(2), l: 'xG against' }]; },
+    tipFor: (i) => { const m = all[i]; return [{ v: matchLabel(m, T) }, { v: `${result(m, T)} ${goalsFor(m, T)}–${goalsAg(m, T)}`, strong: true }, { color: A, v: fmt(m.ts[T][kF], useXg ? 2 : 0), l: unit + ' for' }, { color: B, v: fmt(m.ts[T][kA], useXg ? 2 : 0), l: unit + ' against' }]; },
   });
-  trend.append(legend([['xG for', A, 'line'], ['xG against', B, 'line line-dash']]));
+  trend.append(legend([[unit + ' for', A, 'line'], [unit + ' against', B, 'line line-dash']]));
 
   // Possession snapshot
-  grid.append(card('Game states', rangeLabel() + ' · share of ball-in-play time', phaseBlock(a)));
+  if (DB.hasEvents) grid.append(card('Game states', rangeLabel() + ' · share of ball-in-play time', phaseBlock(a)));
 
   // Top players
   const pls = Object.values(DB.players).filter((p) => p.team === T).map((p) => ({ p, a: aggPlayer(ms, p.id) })).filter((x) => x.a.min > 0);
-  const top = (k, f) => pls.slice().sort((x, y) => f(y.a) - f(x.a)).slice(0, 3);
+  const top = (k, f) => pls.filter((x) => has(f(x.a))).sort((x, y) => f(y.a) - f(x.a)).slice(0, 3);
   const leaders = h('div', { class: 'grid three' });
-  [['Goals', (a) => a.g, (a) => a.g + ' (' + a.xg.toFixed(1) + ' xG)'], ['Chances created', (a) => a.xa + a.key * 0.01, (a) => a.key + ' key passes · ' + a.xa.toFixed(1) + ' xA'], ['Progressive passes', (a) => a.prog, (a) => a.prog + ' in ' + a.min + ' min'], ['Ball winning', (a) => a.tkl + a.int + a.rec, (a) => a.tkl + a.int + a.rec + ' tackles, interceptions & recoveries']].forEach(([l, f, t]) => {
+  const n0 = (v) => (has(v) ? v : 0);
+  [
+    ['Goals', (a) => a.g, (a) => a.g + (has(a.xg) ? ' (' + a.xg.toFixed(1) + ' xG)' : ' in ' + a.min + ' min')],
+    ['Chances created', (a) => n0(a.xa) + a.key * 0.01 + a.ast * 0.1, (a) => a.key + ' key passes · ' + (has(a.xa) ? a.xa.toFixed(1) + ' xA' : a.ast + ' assists')],
+    ['Progressive passes', (a) => a.prog, (a) => a.prog + ' in ' + a.min + ' min'],
+    ['Ball winning', (a) => a.tkl + a.int + n0(a.rec), (a) => a.tkl + a.int + n0(a.rec) + (has(a.rec) ? ' tackles, interceptions & recoveries' : ' tackles & interceptions')],
+    ['Average rating', (a) => (a.rtN >= 3 ? a.rt / a.rtN : NaN), (a) => (a.rt / a.rtN).toFixed(2) + ' over ' + a.rtN + ' matches'],
+  ].filter(([, f]) => pls.some((x) => has(f(x.a)))).slice(0, 4).forEach(([l, f, t]) => {
     leaders.append(h('div', null, h('div', { class: 'eyebrow', text: l }), h('ol', { style: { margin: '6px 0 0', paddingLeft: '18px' } }, top(l, f).map((x) => h('li', null, h('a', { href: '#players', onclick: (e) => { e.preventDefault(); S.tab = 'players'; S.player = x.p.id; render(); }, style: { color: 'var(--ink)' }, text: x.p.name }), h('div', { class: 'sub', text: t(x.a) }))))));
   });
   grid.append(card({ title: 'Squad leaders', span: false }, rangeLabel(), leaders));
@@ -490,6 +507,11 @@ function viewTeam(el) {
   el.append(h('div', { class: 'hero' }, h('h1', { text: teamName(T) }), h('div', { class: 'meta' }, h('span', { text: rangeLabel() + ' · ' + ms.length + (ms.length === 1 ? ' match' : ' matches') }))));
   const grid = h('div', { class: 'grid' });
   el.append(grid);
+  if (!DB.hasEvents) {
+    grid.append(eventsNote('Pitch maps', 'Touch maps, shot maps, game states, possession outcomes, passing networks and territory'));
+    grid.append(card({ title: 'Team profile', span: true }, `${rangeLabel()} vs the other ${leagueAggs().length - 1} teams over the same span · bar = league rank, longer is better`, profileTable(T)));
+    return;
+  }
 
   // Heatmap
   const hm = heatmap(ms, T, S.heat, A);
@@ -558,8 +580,10 @@ function profileTable(T) {
   const groups = {};
   TEAM_METRICS.filter((m) => m.grp !== 'Results').forEach((m) => (groups[m.grp] = groups[m.grp] || []).push(m));
   const wrap = h('div', { class: 'grid three' });
-  Object.entries(groups).forEach(([g, list]) => {
-    const n = leagueAggs().length;
+  Object.entries(groups).forEach(([g, all]) => {
+    const list = all.filter((mt) => has(mt.f(a)));
+    if (!list.length) return;
+    const n = leagueAggs().filter((r) => has(list[0].f(r.a))).length;
     wrap.append(h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '8px' }, text: g }), hbars(list.map((mt) => {
       const rk = rankOf(mt, T), v = mt.f(a);
       const score = mt.dir === 0 ? (v - rk.min) / ((rk.max - rk.min) || 1) * (n - 1) + 1 : n - rk.rank + 1;
@@ -579,15 +603,18 @@ const PCOLS = [
   ['min', 'Min', (a) => a.min, 0, false], ['g', 'G', (a) => a.g, 2], ['xg', 'xG', (a) => a.xg, 2], ['ast', 'A', (a) => a.ast, 2], ['xa', 'xA', (a) => a.xa, 2], ['sh', 'Sh', (a) => a.sh, 2],
   ['key', 'KP', (a) => a.key, 2], ['pct', 'Pass%', (a) => 100 * safe(a.pc, a.pa), 0, false], ['prog', 'PrgP', (a) => a.prog, 2], ['progC', 'PrgC', (a) => a.progC, 2],
   ['drbW', 'Drb', (a) => a.drbW, 2], ['tkl', 'Tkl', (a) => a.tkl, 2], ['int', 'Int', (a) => a.int, 2], ['rec', 'Rec', (a) => a.rec, 2], ['duel', 'Duel%', (a) => 100 * safe(a.duelW, a.duel), 0, false], ['touch', 'Touch', (a) => a.touch, 1],
+  ['rating', 'Rtg', (a) => (a.rtN ? a.rt / a.rtN : NaN), 2, false],
 ];
-const PCOL_TIPS = { min: 'Minutes', g: 'Goals', xg: 'Expected goals', ast: 'Assists', xa: 'Expected assists', sh: 'Shots', key: 'Key passes', pct: 'Pass completion', prog: 'Progressive passes', progC: 'Progressive carries', drbW: 'Successful dribbles', tkl: 'Tackles', int: 'Interceptions', rec: 'Ball recoveries', duel: 'Duels won', touch: 'Touches' };
+const PCOL_TIPS = { min: 'Minutes', g: 'Goals', xg: 'Expected goals', ast: 'Assists', xa: 'Expected assists', sh: 'Shots', key: 'Key passes', pct: 'Pass completion', prog: 'Progressive passes', progC: 'Progressive carries', drbW: 'Successful dribbles', tkl: 'Tackles', int: 'Interceptions', rec: 'Ball recoveries', duel: 'Duels won', touch: 'Touches', rating: 'Average match rating' };
 function colVal(c, a) { const v = c[2](a); return S.per90 && c[4] !== false && c[0] !== 'min' ? safe(v * 90, a.min) : v; }
 function viewPlayers(el) {
   const T = S.team, ms = scoped(T);
   let rows = Object.values(DB.players).filter((p) => p.team === T).map((p) => ({ p, a: aggPlayer(ms, p.id) })).filter((r) => r.a.min > 0);
   if (S.group !== 'all') rows = rows.filter((r) => r.p.group === S.group);
-  const sc = PCOLS.find((c) => c[0] === S.sort) || PCOLS[0];
-  rows.sort((x, y) => colVal(sc, y.a) - colVal(sc, x.a));
+  const cols = PCOLS.filter((c) => rows.some((r) => has(c[2](r.a))));
+  const sc = cols.find((c) => c[0] === S.sort) || cols[0];
+  const sv0 = (a) => { const v = colVal(sc, a); return has(v) ? v : -Infinity; };
+  rows.sort((x, y) => sv0(y.a) - sv0(x.a));
   if (!S.player || !DB.players[S.player] || DB.players[S.player].team !== T) S.player = rows[0] ? rows[0].p.id : null;
 
   if (S.player) el.append(playerProfile(S.player, ms));
@@ -596,10 +623,10 @@ function viewPlayers(el) {
     seg([['all', 'All'], ['GK', 'GK'], ['DEF', 'DEF'], ['MID', 'MID'], ['FWD', 'FWD']], S.group, (v) => { S.group = v; render(); }, 'Position'),
     seg([[true, 'Per 90'], [false, 'Totals']], S.per90, (v) => { S.per90 = v; render(); }, 'Units'));
   const t = h('table', null,
-    h('thead', null, h('tr', null, h('th', { class: 'l', text: 'Player' }), PCOLS.map((c) => h('th', { class: 'sortable' + (c[0] === S.sort ? ' sorted' : ''), title: PCOL_TIPS[c[0]], onclick: () => { S.sort = c[0]; render(); }, text: c[1] })))),
+    h('thead', null, h('tr', null, h('th', { class: 'l', text: 'Player' }), cols.map((c) => h('th', { class: 'sortable' + (c[0] === sc[0] ? ' sorted' : ''), title: PCOL_TIPS[c[0]], onclick: () => { S.sort = c[0]; render(); }, text: c[1] })))),
     h('tbody', null, rows.map((r) => h('tr', { class: r.p.id === S.player ? 'focus' : '', onclick: () => { S.player = r.p.id; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); } },
       h('td', { class: 'l' }, h('span', { class: 'badge', text: r.p.role || r.p.group }), r.p.name),
-      PCOLS.map((c) => h('td', { text: fmt(colVal(c, r.a), c[0] === 'min' || c[3] === 0 ? 0 : S.per90 ? 2 : c[0] === 'xg' || c[0] === 'xa' ? 1 : 0) }))))));
+      cols.map((c) => h('td', { text: fmt(colVal(c, r.a), c[0] === 'min' || c[3] === 0 ? 0 : c[0] === 'rating' || S.per90 ? 2 : c[0] === 'xg' || c[0] === 'xa' ? 1 : 0) }))))));
   el.append(card({ title: 'Squad', tools }, `${teamName(T)} · ${rangeLabel()} · ${S.per90 ? 'per 90 minutes' : 'totals'} · click a column to sort, a row to open the player`, h('div', { class: 'tbl-wrap' }, t)));
 }
 function peerPool(group) {
@@ -619,19 +646,30 @@ const PROFILE_METRICS = {
   DEF: ['prog', 'f3e', 'pct', 'progC', 'xa', 'tkl', 'int', 'rec', 'clr', 'duel', 'npxg'],
   GK: ['pa', 'pct', 'prog', 'f3e', 'rec', 'clr'],
 };
+// Fallback profile for stats-only sources (no xG or pitch locations)
+const STATS_PROFILE = {
+  FWD: ['g', 'sh', 'ast', 'key', 'drbW', 'pct', 'duel', 'rating'],
+  MID: ['ast', 'key', 'pa', 'pct', 'drbW', 'tkl', 'int', 'duel', 'rating'],
+  DEF: ['pa', 'pct', 'tkl', 'int', 'duel', 'fls', 'rating'],
+  GK: ['pa', 'pct', 'rating'],
+};
 function percentile(pid, group, k) {
   const pool = peerPool(group);
   const mt = PLAYER_METRICS.find((m) => m.k === k);
-  const vals = pool.map((x) => playerValue(mt, x.a, true));
+  const vals = pool.map((x) => playerValue(mt, x.a, true)).filter(has);
   const me = pool.find((x) => x.p.id === pid);
   if (!me || vals.length < 3) return null;
   const v = playerValue(mt, me.a, true);
+  if (!has(v)) return null;
   const below = vals.filter((x) => x < v).length, eq = vals.filter((x) => x === v).length;
   return { pct: Math.round((100 * (below + eq / 2)) / vals.length), v, n: vals.length };
 }
 function pctBars(players, colors) {
   const group = DB.players[players[0]].group;
-  const keys = PROFILE_METRICS[group] || PROFILE_METRICS.MID;
+  const pool = peerPool(group);
+  const avail = (k) => { const mt = PLAYER_METRICS.find((m) => m.k === k); return pool.some((x) => has(playerValue(mt, x.a, true))); };
+  let keys = (PROFILE_METRICS[group] || PROFILE_METRICS.MID).filter(avail);
+  if (keys.length < 6) keys = keys.concat(STATS_PROFILE[group].filter((k) => avail(k) && !keys.includes(k)));
   return h('div', { class: 'pct' }, keys.map((k) => {
     const mt = PLAYER_METRICS.find((m) => m.k === k);
     return h('div', { class: 'pct-row' }, h('div', { class: 'nm', text: mt.l + (mt.p90 ? ' /90' : '') }),
@@ -675,7 +713,12 @@ function playerProfile(pid, ms) {
   ms.forEach((m) => m.events.forEach((e) => e.type === 'shot' && e.pl === pid && shots.push({ e, m })));
   const head = h('div', { class: 'profile-h' }, h('h2', { text: p.name }),
     h('span', { class: 'sub', text: `${p.num != null ? '#' + p.num + ' · ' : ''}${GROUP_NAME[p.group]}${p.role ? ' (' + p.role + ')' : ''} · ${teamName(p.team)}` }));
-  const stats = h('div', { class: 'statline' }, [[a.min, 'Minutes'], [a.st, 'Starts'], [a.g, 'Goals'], [a.xg.toFixed(1), 'xG'], [a.ast, 'Assists'], [a.xa.toFixed(1), 'xA'], [fmt(100 * safe(a.pc, a.pa), 0) + '%', 'Pass completion'], [a.tkl + a.int, 'Tackles + int']].map(([v, l]) => h('div', null, h('b', { text: v }), h('span', { text: l }))));
+  const stats = h('div', { class: 'statline' }, [[a.min, 'Minutes'], [a.st, 'Starts'], [a.g, 'Goals'], [fmt(a.xg, 1), 'xG'], [a.ast, 'Assists'], [fmt(a.xa, 1), 'xA'], [a.rtN ? (a.rt / a.rtN).toFixed(2) : '–', 'Avg rating'], [fmt(100 * safe(a.pc, a.pa), 0) + '%', 'Pass completion'], [a.tkl + a.int, 'Tackles + int']].map(([v, l]) => h('div', null, h('b', { text: v }), h('span', { text: l }))));
+  if (!DB.hasEvents) {
+    return card({ title: 'Player profile', span: true }, rangeLabel(), head, stats,
+      h('div', { class: 'grid' }, h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '6px' }, text: 'Percentile vs league ' + GROUP_NAME[p.group].toLowerCase() + 's · per 90' }), pctBars([pid], [A])),
+        h('p', { class: 'note', text: 'Heatmaps and action maps need event data with pitch locations, which this data source does not include.' })));
+  }
   const hm = heatmap(ms, p.team, 'all', A, pid);
   const grid = h('div', { class: 'grid three' });
   grid.append(h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '6px' }, text: 'Heatmap · ' + hm.n + ' events' }), hm.el));
@@ -703,8 +746,15 @@ function viewCompare(el) {
     h('div', { class: 'meta' }, h('div', { class: 'field' }, h('label', { for: 'cmp-b', text: 'Compare with' }), pickB), h('span', { class: 'sub', text: { season: 'Season to date', last5: 'Last 5 matches each', last3: 'Last 3 matches each' }[leagueRange()] }))));
   const grid = h('div', { class: 'grid' });
   el.append(grid);
-  const keys = ['ppg', 'xg', 'xga', 'npxg', 'sh', 'xgsh', 'boxe', 'spxg', 'poss', 'pass', 'ppp', 'direct', 'prog', 'tilt', 'ppda', 'height', 'hto', 'duel'];
+  const keys = teamHas(['ppg', 'g', 'ga', 'xg', 'xga', 'npxg', 'sh', 'sha', 'sot', 'shIn', 'xgsh', 'boxe', 'spxg', 'cor', 'poss', 'pass', 'ppp', 'direct', 'prog', 'tilt', 'ppda', 'height', 'hto', 'duel', 'fls', 'yc'], aA, aB);
   grid.append(card('Head to head', 'Per-match averages · bars scaled to the league maximum · bold marks the better side', butterfly(teamName(A), teamName(B), keys.map((k) => TM[k]), aA, aB, colA, colB)));
+  if (!DB.hasEvents) {
+    const selA = boardSelection(A, msA), selB = boardSelection(B, msB);
+    if (selA && selB) grid.append(card({ title: 'Usual line-ups', span: true }, 'Most-used formation and XI for each side', h('div', { class: 'twin' },
+      [[A, selA, colA], [B, selB, colB]].map(([T, sel, c]) => h('div', null, h('h3', null, h('span', { class: 'swatch', style: { background: c } }), teamName(T), h('span', { class: 'sub', text: sel.form + ' (' + sel.matches.length + ' of ' + scoped(T, leagueRange()).length + ')' })), tacticalBoard(sel, T, 'plan', c))))));
+    grid.append(eventsNote('Pitch maps', 'Game states, passing networks, touch maps and shot maps'));
+    return;
+  }
   grid.append(card('Game states', 'Share of ball-in-play time', h('div', { class: 'twin' },
     [[A, aA], [B, aB]].map(([T, a], i) => h('div', null, h('h3', null, h('span', { class: 'swatch', style: { background: i ? colB : colA } }), teamName(T)), phaseBlock(a, true))))));
   const pnA = passNetwork(msA, A, colA), pnB = passNetwork(msB, B, colB);
@@ -730,11 +780,12 @@ function butterfly(nameA, nameB, metrics, aA, aB, colA, colB) {
   return h('div', null, h('div', { class: 'fly-head' }, h('div', { style: { color: colA } , text: nameA }), h('div'), h('div', { style: { color: colB }, text: nameB })),
     h('div', { class: 'fly' }, metrics.map((mt) => {
       const va = mt.f(aA), vb = mt.f(aB);
+      const d = Number.isInteger(va) && Number.isInteger(vb) ? 0 : mt.d; // single-match counts read as whole numbers
       const mx = Math.max(va, vb, ...L.map((r) => mt.f(r.a))) || 1;
       const better = mt.dir === 0 ? 0 : (va - vb) * mt.dir;
-      const side = (v, c, cls, win) => h('div', { class: 'fly-side ' + cls }, h('div', { class: 'trk' }, h('div', { class: 'b', style: { width: clamp((100 * v) / mx, 0, 100) + '%', background: c } })), h('span', { class: 'v' + (win ? ' win' : ''), text: fmt(v, mt.d) }));
+      const side = (v, c, cls, win) => h('div', { class: 'fly-side ' + cls }, h('div', { class: 'trk' }, h('div', { class: 'b', style: { width: clamp((100 * v) / mx, 0, 100) + '%', background: c } })), h('span', { class: 'v' + (win ? ' win' : ''), text: fmt(v, d) }));
       const row = h('div', { class: 'fly-row', tabindex: 0 }, side(va, colA, 'l', better > 0), h('div', { class: 'lab', text: mt.l + (mt.u && mt.u !== '/match' ? ' (' + mt.u + ')' : '') }), side(vb, colB, 'r', better < 0));
-      hover(row, () => [{ v: mt.l, strong: true }, { color: colA, v: fmt(va, mt.d), l: nameA }, { color: colB, v: fmt(vb, mt.d), l: nameB }, mt.tip ? { v: mt.tip } : null, mt.dir === 0 ? { v: 'Style metric · neither side is better' } : null].filter(Boolean));
+      hover(row, () => [{ v: mt.l, strong: true }, { color: colA, v: fmt(va, d), l: nameA }, { color: colB, v: fmt(vb, d), l: nameB }, mt.tip ? { v: mt.tip } : null, mt.dir === 0 ? { v: 'Style metric · neither side is better' } : null].filter(Boolean));
       return row;
     })));
 }
@@ -759,9 +810,10 @@ function comparePlayers(el) {
   const nameLine = (p, c, a) => h('h3', null, h('span', { class: 'swatch', style: { background: c } }), p.name, h('span', { class: 'sub', text: `${teamName(p.team)} · ${p.role || p.group} · ${a.min} min` }));
   const note = pA.group !== pB.group ? 'Different positions: each player is ranked against their own position group, using ' + GROUP_NAME[pA.group].toLowerCase() + ' metrics.' : 'Percentile against league ' + GROUP_NAME[pA.group].toLowerCase() + 's, per 90 minutes';
   grid.append(card('Percentile profile', note, h('div', { style: { marginBottom: '10px' } }, nameLine(pA, colA, aA), nameLine(pB, colB, aB)), pctBars([pA.id, pB.id], [colA, colB])));
-  const rows = PLAYER_METRICS.map((mt) => ({ mt, a: playerValue(mt, aA, true), b: playerValue(mt, aB, true) }));
+  const rows = PLAYER_METRICS.map((mt) => ({ mt, a: playerValue(mt, aA, true), b: playerValue(mt, aB, true) })).filter((r) => has(r.a) || has(r.b));
   grid.append(card('Per 90 numbers', 'All tracked metrics', h('div', { class: 'tbl-wrap' }, h('table', null, h('thead', null, h('tr', null, h('th', { class: 'l', text: 'Metric' }), h('th', { text: pA.name.split(' ').pop(), style: { color: colA } }), h('th', { text: pB.name.split(' ').pop(), style: { color: colB } }))),
     h('tbody', null, rows.map((r) => h('tr', { style: { cursor: 'default' } }, h('td', { class: 'l', text: r.mt.l + (r.mt.p90 ? ' /90' : '') }), h('td', { style: { fontWeight: r.a > r.b ? 700 : 400 }, text: fmt(r.a, r.mt.d) }), h('td', { style: { fontWeight: r.b > r.a ? 700 : 400 }, text: fmt(r.b, r.mt.d) }))))))));
+  if (!DB.hasEvents) return;
   const hA = heatmap(scoped(pA.team, leagueRange()), pA.team, 'all', colA, pA.id), hB = heatmap(scoped(pB.team, leagueRange()), pB.team, 'all', colB, pB.id);
   grid.append(card({ title: 'Heatmaps', span: true }, 'All touches, attacking left to right', h('div', { class: 'twin' }, h('div', null, nameLine(pA, colA, aA), hA.el), h('div', null, nameLine(pB, colB, aB), hB.el))));
 }
@@ -778,7 +830,7 @@ function viewMatches(el) {
     return h('button', { type: 'button', class: 'mrow', 'aria-current': String(m.id === S.match), onclick: () => { S.match = m.id; render(); } },
       h('span', { class: 'd', text: (m.date ? fmtDate(m.date) : '') + ' · R' + m.round }), h('span', { class: 'res ' + r, text: r }),
       h('span', null, (m.home === T ? 'v ' : '@ ') + teamName(oppOf(m, T))), h('span', { class: 'score', text: goalsFor(m, T) + '–' + goalsAg(m, T) }),
-      h('span', { class: 'xg', text: m.ts[T].xg.toFixed(1) + ' – ' + m.ts[T].xga.toFixed(1) + ' xG' }));
+      h('span', { class: 'xg', text: has(m.ts[T].xg) ? m.ts[T].xg.toFixed(1) + ' – ' + m.ts[T].xga.toFixed(1) + ' xG' : has(m.ts[T].sh) ? m.ts[T].sh + ' – ' + m.ts[T].sha + ' shots' : '' }));
   }));
   const report = matchReport(DB.matches.find((m) => m.id === S.match), T);
   grid.append(report, card('Results', teamName(T) + ' · newest first', list));
@@ -790,13 +842,24 @@ function matchReport(m, T) {
   wrap.append(h('div', { class: 'eyebrow', text: `Round ${m.round}${m.date ? ' · ' + fmtDate(m.date) : ''}` }));
   const colOf = (id) => (id === T ? colA : colB);
   wrap.append(h('div', { class: 'scoreboard' },
-    h('div', null, h('div', { class: 'tn', style: { color: colOf(home) }, text: teamName(home) }), h('div', { class: 'xgs', text: (m.forms[home] || '') + ' · ' + m.ts[home].xg.toFixed(2) + ' xG' })),
+    h('div', null, h('div', { class: 'tn', style: { color: colOf(home) }, text: teamName(home) }), h('div', { class: 'xgs', text: [m.forms[home], has(m.ts[home].xg) ? m.ts[home].xg.toFixed(2) + ' xG' : null].filter(Boolean).join(' · ') })),
     h('div', { class: 'sc', text: m.hg + '–' + m.ag }),
-    h('div', null, h('div', { class: 'tn r', style: { color: colOf(away) }, text: teamName(away) }), h('div', { class: 'xgs', style: { textAlign: 'right' }, text: m.ts[away].xg.toFixed(2) + ' xG · ' + (m.forms[away] || '') }))));
-  const scorers = (id) => m.events.filter((e) => e.type === 'shot' && e.out === 'goal' && e.team === id).map((e) => DB.players[e.pl].name.split(' ').pop() + ' ' + Math.floor(e.t / 60 + 1) + "'" + (e.sp === 'pen' ? ' (p)' : '')).join(', ');
+    h('div', null, h('div', { class: 'tn r', style: { color: colOf(away) }, text: teamName(away) }), h('div', { class: 'xgs', style: { textAlign: 'right' }, text: [has(m.ts[away].xg) ? m.ts[away].xg.toFixed(2) + ' xG' : null, m.forms[away]].filter(Boolean).join(' · ') }))));
+  const scorers = (id) => m.timeline ? m.timeline.filter((t) => t.kind === 'goal' && t.team === id).map((t) => (DB.players[t.pl] ? DB.players[t.pl].name.split(' ').pop() : '?') + ' ' + t.min + "'" + (/penalty/i.test(t.detail) ? ' (p)' : /own/i.test(t.detail) ? ' (og)' : '')).join(', ') : m.events.filter((e) => e.type === 'shot' && e.out === 'goal' && e.team === id).map((e) => DB.players[e.pl].name.split(' ').pop() + ' ' + Math.floor(e.t / 60 + 1) + "'" + (e.sp === 'pen' ? ' (p)' : '')).join(', ');
   wrap.append(h('div', { class: 'scoreboard', style: { marginBottom: '16px' } }, h('div', { class: 'sub', text: scorers(home) }), h('div'), h('div', { class: 'sub', style: { textAlign: 'right' }, text: scorers(away) })));
   const grid = h('div', { class: 'grid' });
   wrap.append(grid);
+  const statKeys = (aT, aO) => teamHas(['xg', 'sh', 'sot', 'shIn', 'xgsh', 'poss', 'pass', 'prog', 'f3e', 'boxe', 'tilt', 'cor', 'ppda', 'height', 'hto', 'duel', 'fls', 'yc'], aT, aO).map((k) => TM[k]);
+  if (!m.events.length) {
+    const aT = m.ts[T], aO = m.ts[O];
+    grid.append(h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '8px' }, text: 'Match stats' }), butterfly(teamName(T), teamName(O), statKeys(aT, aO), aT, aO, colA, colB)));
+    grid.append(h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '8px' }, text: 'Timeline' }), matchTimeline(m, T, colA, colB)));
+    const one = (id) => { const sel = boardSelection(id, [m]); return sel ? tacticalBoard(sel, id, 'plan', id === T ? colA : colB) : h('p', { class: 'empty', text: 'No line-up' }); };
+    grid.append(h('div', { style: { gridColumn: '1 / -1' } }, h('div', { class: 'eyebrow', style: { marginBottom: '8px' }, text: 'Starting line-ups · both attacking right' }), h('div', { class: 'twin' },
+      h('div', null, h('h3', null, h('span', { class: 'swatch', style: { background: colA } }), teamName(T), h('span', { class: 'sub', text: m.forms[T] || '' })), one(T)),
+      h('div', null, h('h3', null, h('span', { class: 'swatch', style: { background: colB } }), teamName(O), h('span', { class: 'sub', text: m.forms[O] || '' })), one(O)))));
+    return wrap;
+  }
   // momentum
   const mom = h('div');
   grid.append(h('div', null, h('div', { class: 'eyebrow', text: 'xG race · cumulative by minute' }), mom, legend([[teamName(T), colA, 'line'], [teamName(O), colB, 'line']])));
@@ -806,13 +869,26 @@ function matchReport(m, T) {
   grid.append(h('div', null, h('div', { class: 'eyebrow', text: `Shot map · ${teamName(T)} attacking right` }), shotMap(shots, colA, { full: true }), shotLegend(css('--ink-2'))));
   // stats
   const aT = m.ts[T], aO = m.ts[O];
-  grid.append(h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '8px' }, text: 'Match stats' }), butterfly(teamName(T), teamName(O), ['xg', 'sh', 'sot', 'xgsh', 'poss', 'pass', 'prog', 'f3e', 'boxe', 'tilt', 'ppda', 'height', 'hto', 'duel'].map((k) => TM[k]), aT, aO, colA, colB)));
+  grid.append(h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '8px' }, text: 'Match stats' }), butterfly(teamName(T), teamName(O), statKeys(aT, aO), aT, aO, colA, colB)));
   grid.append(h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '8px' }, text: 'Game states' }), h('div', { class: 'twin' }, [[T, aT, colA], [O, aO, colB]].map(([id, a, c]) => h('div', null, h('h3', null, h('span', { class: 'swatch', style: { background: c } }), teamName(id)), phaseBlock(a, true))))));
   const pnT = passNetwork([m], T, colA), pnO = passNetwork([m], O, colB);
   grid.append(h('div', { style: { gridColumn: '1 / -1' } }, h('div', { class: 'eyebrow', style: { marginBottom: '8px' }, text: 'Passing networks · starting XIs, both attacking right' }), h('div', { class: 'twin' },
     h('div', null, h('h3', null, h('span', { class: 'swatch', style: { background: colA } }), teamName(T), h('span', { class: 'sub', text: m.forms[T] || '' })), pnT.el),
     h('div', null, h('h3', null, h('span', { class: 'swatch', style: { background: colB } }), teamName(O), h('span', { class: 'sub', text: m.forms[O] || '' })), pnO.el))));
   return wrap;
+}
+function matchTimeline(m, T, colA, colB) {
+  const items = (m.timeline || []).slice().sort((a, b) => a.min - b.min);
+  if (!items.length) return h('p', { class: 'empty', text: 'No match events in this data.' });
+  const name = (id) => (DB.players[id] ? DB.players[id].name : '?');
+  return h('ol', { class: 'timeline' }, items.map((t) => {
+    const icon = { goal: 'Goal', yellow: 'Yellow', red: 'Red', sub: 'Sub' }[t.kind];
+    const text = t.kind === 'goal' ? name(t.pl) + (t.as ? ' (assist ' + name(t.as).split(' ').pop() + ')' : '') + (/penalty/i.test(t.detail) ? ' · penalty' : /own/i.test(t.detail) ? ' · own goal' : '')
+      : t.kind === 'sub' ? name(t.pl) + ' on for ' + name(t.as) : name(t.pl);
+    return h('li', { class: 'tl-' + t.kind + (t.team === T ? '' : ' opp') },
+      h('span', { class: 'tl-min', text: t.min + "'" }), h('span', { class: 'tl-dot', style: { background: t.team === T ? colA : colB } }),
+      h('span', { class: 'tl-kind', text: icon }), h('span', { class: 'tl-text', text: text }));
+  }));
 }
 function xgRace(box, m, T, O, colA, colB) {
   const W = Math.max(280, box.clientWidth || 500), H = 210, mg = { l: 30, r: 12, t: 12, b: 24 };
@@ -852,7 +928,7 @@ function viewData(el) {
   const status = h('div', { class: 'status', role: 'status' });
   const input = h('input', { type: 'file', id: 'file', accept: '.json,application/json', multiple: true, hidden: true, onchange: (e) => load(e.target.files) });
   const drop = h('div', { class: 'drop' },
-    h('p', { style: { margin: '0 0 10px' } }, 'Drop StatsBomb event files here (one ', h('code', { text: '<match_id>.json' }), ' per match), plus the competition’s ', h('code', { text: 'matches.json' }), ' for dates and home/away.'),
+    h('p', { style: { margin: '0 0 10px' } }, 'Drop the API-Football file from the download script here, or StatsBomb event files (one ', h('code', { text: '<match_id>.json' }), ' per match, plus the competition’s ', h('code', { text: 'matches.json' }), ').'),
     h('button', { class: 'btn', type: 'button', onclick: () => input.click(), text: 'Choose files' }), input);
   ['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add('over'); }));
   ['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
@@ -864,24 +940,31 @@ function viewData(el) {
     status.textContent = 'Reading ' + files.length + ' file' + (files.length > 1 ? 's' : '') + '…';
     try {
       const parsed = await Promise.all(files.map(async (f) => ({ name: f.name, data: JSON.parse(await f.text()) })));
-      const { db, errors } = importStatsBomb(parsed);
-      if (!db.matches.length) { status.className = 'status err'; status.textContent = 'No matches found. Each event file must be a StatsBomb events array that includes the two "Starting XI" events.'; return; }
+      const af = isApiFootball(parsed);
+      const { db, errors } = af ? importApiFootball(parsed) : importStatsBomb(parsed);
+      if (!db.matches.length) {
+        status.className = 'status err';
+        status.textContent = af ? (errors[0] || 'No finished matches found.') : 'No matches found. Use the API-Football file from the download script, or StatsBomb event files (each must include the two "Starting XI" events).';
+        return;
+      }
       DB = prepareDB(db);
       cache.clear();
       const counts = {};
       DB.matches.forEach((m) => [m.home, m.away].forEach((t) => (counts[t] = (counts[t] || 0) + 1)));
-      S.team = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+      const abd = DB.teams.find((t) => /aberdeen/i.test(t.name));
+      S.team = abd ? abd.id : Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+      S.form = null; S.shape = 'plan';
       S.cmp = (DB.teams.find((t) => t.id !== S.team) || DB.teams[0]).id;
       S.range = 'season'; S.player = null; S.match = null; S.pA = null; S.pB = null;
       S.tab = 'overview';
       render();
     } catch (err) {
       status.className = 'status err';
-      status.textContent = 'Could not read the files: ' + err.message + '. Check they are StatsBomb JSON exports.';
+      status.textContent = 'Could not read the files: ' + err.message + '. Check they are API-Football or StatsBomb JSON files.';
     }
   }
   const prose = h('div', { class: 'prose' },
-    h('p', null, 'Every chart in Touchline Lab is computed from match events (passes, carries, shots, tackles and so on) with pitch coordinates. That is what makes heatmaps, passing networks and game states possible. Any data with that shape can drive the app.'),
+    h('p', null, 'The pitch charts in Touchline Lab (heatmaps, shot maps, passing networks, game states) are computed from match events with pitch coordinates. Tables, rankings, line-ups and formations also work from plain match and player stats.'),
     h('h3', { text: 'What you are looking at now' }),
     DB.source === 'demo'
       ? h('p', null, 'A synthetic 12-team season to date (12 rounds, 72 matches, about 1,600 events per match). Club names are real; players, results and every number are generated by a seeded simulation with different style settings per club (pressing height, directness, width, formation). Use it to explore the tools, not to judge real teams.')
@@ -890,12 +973,19 @@ function viewData(el) {
     h('ul', null,
       h('li', null, h('b', { text: 'Event data for the Scottish Premiership' }), ' (needed for heatmaps and passing networks) comes from commercial providers such as Hudl StatsBomb, Opta (Stats Perform) and Wyscout. Clubs and media usually license it. If you can get StatsBomb-format exports, drop them in below.'),
       h('li', null, h('b', { text: 'Free practice data: ' }), h('a', { href: 'https://github.com/statsbomb/open-data', target: '_blank', rel: 'noopener', text: 'StatsBomb Open Data' }), ' on GitHub has full event data for selected competitions (World Cups, Euros, some league seasons). The Scottish Premiership is not included, but it is the quickest way to load real matches here and test team comparisons.'),
-      h('li', null, h('b', { text: 'Team-level numbers only' }), ' (results, xG, possession) are available from public stats sites, but without event coordinates the spatial views stay empty.')));
+      h('li', null, h('b', { text: 'Match and player stats, line-ups and formations' }), ' for Aberdeen and the rest of the Scottish Premiership: use the API-Football download below. Without event locations, the pitch maps stay empty.')));
   el.append(h('div', { class: 'grid' },
     card('Data source', DB.label, prose),
-    card('Import StatsBomb data', 'Files stay in your browser. Nothing is uploaded.', drop, status,
+    card('Import data', 'API-Football or StatsBomb files · they stay in your browser, nothing is uploaded', drop, status,
       DB.source !== 'demo' ? h('div', { style: { marginTop: '12px' } }, h('button', { class: 'btn ghost', type: 'button', onclick: () => { DB = DEMO; cache.clear(); S.team = 'ABE'; S.cmp = 'CEL'; S.range = 'season'; S.player = null; S.match = null; S.pA = S.pB = null; render(); }, text: 'Back to demo season' })) : null,
-      h('p', { class: 'note', text: 'Tip: in the open-data repository, events live in data/events/ and fixtures in data/matches/<competition_id>/<season_id>.json. Load several matches from one competition to unlock league tables and rankings.' }))));
+      h('p', { class: 'note', text: 'StatsBomb tip: in the open-data repository, events live in data/events/ and fixtures in data/matches/<competition_id>/<season_id>.json. Load several matches from one competition to unlock league tables and rankings.' })),
+    card('Real Aberdeen data from API-Football', 'Free tier: about 100 requests a day, enough for a full season', h('div', { class: 'prose' },
+      h('ol', null,
+        h('li', null, 'Get a free key at ', h('a', { href: 'https://dashboard.api-football.com', target: '_blank', rel: 'noopener', text: 'dashboard.api-football.com' }), '.'),
+        h('li', null, 'Install ', h('a', { href: 'https://nodejs.org', target: '_blank', rel: 'noopener', text: 'Node.js' }), ' (version 18 or newer), download the Touchline Lab repository, and in its folder run:', h('pre', { class: 'cmd', text: 'API_FOOTBALL_KEY=your_key node tools/fetch-api-football.mjs --season 2025' }), 'On Windows PowerShell: ', h('code', { text: '$env:API_FOOTBALL_KEY="your_key"' }), ' first, then the node command.'),
+        h('li', null, 'Drop the saved ', h('code', { text: 'api-football-179-2025.json' }), ' into the import box. Season years are the starting year, so 2025 means 2025/26. League 179 is the Scottish Premiership; ', h('code', { text: '--find "Premiership"' }), ' lists others.')),
+      h('p', null, 'You get results, league table, line-ups and formations, team match stats (shots, possession, passing, corners, cards, and xG where the feed has it) and player stats with ratings. Heatmaps, passing networks and game states still need event data with pitch locations.'),
+      h('p', null, 'The free plan may only cover some seasons. If the season you ask for is not included, the script prints the message from API-Football.')))));
 }
 
 /* ---------- Boot ---------- */

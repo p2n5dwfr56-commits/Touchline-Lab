@@ -212,7 +212,8 @@ function viewTactics(el) {
   // Tactical line-up board
   const formTools = sel.used.length > 1 && !single
     ? seg(sel.used.map(([f, list]) => [f, f + ' (' + list.length + ')']), sel.form, (v) => { S.form = v; render(); }, 'Formation') : null;
-  const modeTools = seg(SHAPE_MODES, S.shape, (v) => { S.shape = v; render(); }, 'Shape view');
+  if (!DB.hasEvents) S.shape = 'plan';
+  const modeTools = DB.hasEvents ? seg(SHAPE_MODES, S.shape, (v) => { S.shape = v; render(); }, 'Shape view') : null;
   const caption = {
     plan: 'Listed formation with the usual player in each slot',
     in: 'Average position of each player’s on-ball actions and passes received',
@@ -234,11 +235,12 @@ function viewTactics(el) {
       const a = aggTeam(list, T);
       return h('tr', { class: f === sel.form ? 'focus' : '', onclick: () => { S.form = f; render(); }, title: 'Show ' + f + ' on the board' },
         h('td', { class: 'l', text: f }), h('td', { text: list.length }), h('td', { text: a.w }), h('td', { text: a.d }), h('td', { text: a.l }),
-        h('td', { text: (a.pts / a.n).toFixed(2) }), h('td', { text: (a.xg / a.n).toFixed(2) }), h('td', { text: (a.xga / a.n).toFixed(2) }), h('td', { text: TM.poss.f(a).toFixed(0) + '%' }));
+        h('td', { text: (a.pts / a.n).toFixed(2) }), h('td', { text: fmt(a.xg / a.n, 2) }), h('td', { text: fmt(a.xga / a.n, 2) }), h('td', { text: has(TM.poss.f(a)) ? TM.poss.f(a).toFixed(0) + '%' : '–' }));
     })));
   grid.append(card('Formations used', 'Per-match averages in each starting formation · click a row to show it', h('div', { class: 'tbl-wrap' }, ft)));
 
-  // Shape numbers vs league
+  // Shape numbers vs league (need pitch locations)
+  if (!DB.hasEvents) { grid.append(againstShape(T, ms)); return; }
   const mine = shapeAgg(ms, T);
   const league = leagueAggs().map((r) => ({ id: r.team.id, s: shapeAgg(scoped(r.team.id, leagueRange()), r.team.id) }));
   grid.append(card('Shape numbers', 'Measured from starting XIs · bar scaled from league lowest to highest', hbars(SHAPE_METRICS.map((mt) => {
@@ -252,19 +254,21 @@ function viewTactics(el) {
     };
   })), h('p', { class: 'note', text: 'These describe style rather than quality: a high line and a short team suit pressing sides, a deep line suits counter-attacking ones.' })));
 
-  // Results by opponent shape
+  grid.append(againstShape(T, ms));
+}
+function againstShape(T, ms) {
   const fam = (f) => { const d = String(f || '').split('-')[0]; return d === '3' ? 'Back three' : d === '4' ? 'Back four' : d === '5' ? 'Back five' : 'Other'; };
   const byFam = {};
   ms.forEach((m) => { const k = fam(m.forms[oppOf(m, T)]); (byFam[k] = byFam[k] || []).push(m); });
   const famRows = Object.entries(byFam).sort((a, b) => b[1].length - a[1].length);
-  grid.append(card('Against each shape', 'Results by the opponent’s starting back line', h('div', { class: 'tbl-wrap' }, h('table', null,
+  return card('Against each shape', 'Results by the opponent’s starting back line', h('div', { class: 'tbl-wrap' }, h('table', null,
     h('thead', null, h('tr', null, ['Opponent', 'Played', 'W', 'D', 'L', 'Pts/G', 'xG', 'xGA', 'Formations faced'].map((c, i) => h('th', { class: i === 0 || i === 8 ? 'l' : '', text: c })))),
     h('tbody', null, famRows.map(([k, list]) => {
       const a = aggTeam(list, T);
       const faced = {};
       list.forEach((m) => { const f = m.forms[oppOf(m, T)] || '?'; faced[f] = (faced[f] || 0) + 1; });
       return h('tr', { style: { cursor: 'default' } }, h('td', { class: 'l', text: k }), h('td', { text: list.length }), h('td', { text: a.w }), h('td', { text: a.d }), h('td', { text: a.l }),
-        h('td', { text: (a.pts / a.n).toFixed(2) }), h('td', { text: (a.xg / a.n).toFixed(2) }), h('td', { text: (a.xga / a.n).toFixed(2) }),
+        h('td', { text: (a.pts / a.n).toFixed(2) }), h('td', { text: fmt(a.xg / a.n, 2) }), h('td', { text: fmt(a.xga / a.n, 2) }),
         h('td', { class: 'l sub', text: Object.entries(faced).sort((x, y) => y[1] - x[1]).map(([f, c]) => f + ' ×' + c).join(', ') }));
-    }))))));
+    })))));
 }
