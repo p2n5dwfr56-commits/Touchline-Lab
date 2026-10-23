@@ -49,7 +49,25 @@ function savedSummary(log) {
   if (!log) return null;
   const fb = log.fbref || [];
   const teams = [...new Set(fb.map((f) => f.teamName))];
-  return { files: log.primary.map((f) => f.name), label: log.label || '', fbTables: fb.reduce((s, f) => s + f.texts.length, 0), fbTeams: teams, manual: (log.manual || []).length, savedAt: log.savedAt };
+  return { files: log.primary.map((f) => f.name), label: log.label || '', fbTables: fb.reduce((s, f) => s + f.texts.length, 0), fbTeams: teams, manual: (log.manual || []).length, layers: (log.layers || []).map((l) => l.name), savedAt: log.savedAt };
+}
+// Whole-season add-on files (Sportmonks downloads), replayed after the FBref tables
+async function carriedLayers(label) {
+  const prev = await storeGet('log');
+  return prev && prev.label === label ? prev.layers || [] : [];
+}
+async function saveLayers(files) {
+  const log = await baseLog();
+  if (!log) return false;
+  const names = new Set(files.map((f) => f.name));
+  log.layers = (log.layers || []).filter((l) => !names.has(l.name)).concat(files.map((f) => ({ name: f.name, text: f.text })));
+  log.savedAt = Date.now();
+  const ok = await storeSet('log', log);
+  STORE.meta = ok ? savedSummary(log) : STORE.meta;
+  return ok;
+}
+function applyLayers(layers) {
+  (layers || []).forEach((l) => { try { const d = JSON.parse(l.text); if (smIsBundle(d)) attachSportmonks(DB, d); } catch (e) { /* skip a damaged layer */ } });
 }
 // FBref tables and hand-entered matches saved on top of the same season (same label), so an updated season file keeps them
 async function carriedFbref(label) {
@@ -60,8 +78,8 @@ async function carriedManual(label) {
   const prev = await storeGet('log');
   return prev && prev.label === label ? prev.manual || [] : [];
 }
-async function savePrimary(texts, label, fbref, manual) {
-  const log = { v: 1, savedAt: Date.now(), label, primary: texts.map((t) => ({ name: t.name, text: t.text })), fbref: fbref || [], manual: manual || [] };
+async function savePrimary(texts, label, fbref, manual, layers) {
+  const log = { v: 1, savedAt: Date.now(), label, primary: texts.map((t) => ({ name: t.name, text: t.text })), fbref: fbref || [], manual: manual || [], layers: layers || [] };
   const ok = await storeSet('log', log);
   STORE.meta = ok ? savedSummary(log) : null;
   return ok;
@@ -70,7 +88,7 @@ async function savePrimary(texts, label, fbref, manual) {
 async function baseLog() {
   const log = await storeGet('log');
   if (log) return log;
-  if (DB.snapshot && SNAP) return { v: 1, savedAt: Date.now(), label: DB.label, primary: SNAP.primary, fbref: snapshotFbref(DB), manual: [] };
+  if (DB.snapshot && SNAP) return { v: 1, savedAt: Date.now(), label: DB.label, primary: SNAP.primary, fbref: snapshotFbref(DB), layers: (SNAP.layers || []).slice(), manual: [] };
   return null;
 }
 async function saveFbref(teamId, teamNameText, texts) {
@@ -124,6 +142,8 @@ function loadSnapshot() {
   if (!SNAP) return false;
   if (!importTexts(SNAP.primary, null, { restore: true })) return false;
   snapshotFbref(DB).forEach((f) => addFbref(f.texts, f.team, null, { restore: true }));
+  applyLayers(SNAP.layers);
+  cache.clear();
   DB.snapshot = SNAP.asOf;
   return true;
 }
@@ -142,7 +162,9 @@ async function restoreSaved() {
     const ok = importTexts(log.primary, null, { restore: true });
     if (!ok) return { error: 'Your saved data could not be loaded again, so the demo season is showing. Import your files again in the Data tab.' };
     (log.fbref || []).forEach((f) => { if (DB.teamById[f.team]) addFbref(f.texts, f.team, null, { restore: true }); });
+    applyLayers(log.layers);
     (log.manual || []).forEach((e) => applyManual(DB, e));
+    cache.clear();
     DB.manual = (log.manual || []).slice();
     STORE.meta = savedSummary(log);
     return { ok: true };

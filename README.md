@@ -23,14 +23,16 @@ belongs to that browser on that device.
 - `src/apifootball.js` – API-Football importer (match/player stats, line-ups, formations)
 - `src/footballdata.js` – football-data.co.uk CSV importer (results, team match stats, odds)
 - `src/fbref.js` – FBref player table importer (season totals per player)
+- `src/sportmonks.js` – Sportmonks importer (line-ups, events, player match stats), added on top of a season
 - `src/opponents.js` – Opponents tab: record against each club, this season and all-time
 - `src/store.js` – saves imports in the browser and restores them on open; built-in snapshot
 - `tools/embed-snapshot.mjs` – used by `build.sh --with-snapshot`
 - `tools/fetch-api-football.mjs` – downloads a season from API-Football into one file
+- `tools/fetch-sportmonks.mjs` – downloads a Sportmonks season into one file
 - `src/style.css`, `src/head.html` – styling and page head
 
 ## Data
-The built-in season is synthetic. Three kinds of real data can be loaded from the Data tab:
+The built-in season is synthetic. Several kinds of real data can be loaded from the Data tab:
 
 **football-data.co.uk CSV** (free, no key, current season). Results, xG (recent seasons), shots,
 shots on target, corners, fouls, cards and bookmaker odds for every match, one file per league season. The
@@ -79,3 +81,18 @@ Re-run the same command each day: Aberdeen's matches come first, downloaded matc
 matches per request. Then drop the saved `api-football-179-<season>.json` into the Data tab.
 If players look mirrored left/right on the Tactics board, flip `AF_GRID_COL1_LEFT` in
 `src/apifootball.js` and rebuild.
+
+**Sportmonks** (current season, free plan covers the Scottish Premiership; no League Cup, no xG,
+no pitch coordinates). Adds, on top of a loaded season file, every match's line-ups with positions,
+formations, goals, assists, cards, substitutions and per-player match stats (minutes, passes, key
+passes, tackles, duels, dribbles, saves, match rating) for every club, plus the remaining fixtures.
+Players are matched to FBref names where both are loaded.
+
+```sh
+# Node 18+, token from https://my.sportmonks.com (API tokens)
+SPORTMONKS_TOKEN=your_token node tools/fetch-sportmonks.mjs   # league 501, current season
+```
+
+Load the football-data.co.uk CSV first, then drop the saved `sportmonks-501-<season>.json` into
+the Data tab. Matches are paired by teams and date. Re-run after each round for new matches. The
+free plan allows 180 requests an hour; a season takes about 10.

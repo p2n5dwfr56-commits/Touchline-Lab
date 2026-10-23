@@ -716,13 +716,23 @@ function addInto(a, b) {
 }
 function aggTeam(matches, T) { const a = blankTeam(); a.n = 0; matches.forEach((m) => m.ts[T] && addInto(a, m.ts[T])); return a; }
 function aggPlayer(matches, pid) {
-  // Season totals (e.g. from FBref) stand in for players with no per-match stats; they ignore the match range.
-  if (aggPlayer.season && aggPlayer.season[pid]) return { ...aggPlayer.season[pid] };
+  // Per-match stats come first (they follow the match filters). Season totals (e.g. from FBref)
+  // stand in for players with no per-match stats, and fill in only the stats the matches lack.
   const a = blankPlayer();
-  matches.forEach((m) => m.ps[pid] && addInto(a, m.ps[pid]));
+  let any = false;
+  matches.forEach((m) => { if (m.ps[pid]) { addInto(a, m.ps[pid]); any = true; } });
+  const s = aggPlayer.season && aggPlayer.season[pid];
+  if (!s) return a;
+  if (!any) return { ...s };
+  Object.keys(s).forEach((k) => { if (!has(a[k]) && has(s[k])) a[k] = s[k]; });
   return a;
 }
 aggPlayer.season = null;
+// One id per player per club, whatever the source: accents dropped, name words sorted ("Aremu Afeez" = "Afeez Aremu")
+function playerKey(teamId, name) {
+  const w = String(name || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(Boolean).sort();
+  return 'pl-' + teamId + '-' + w.join('-');
+}
 
 // NaN marks a stat the data source does not provide; it propagates so the UI can hide it.
 const safe = (a, b) => (Number.isNaN(a) || Number.isNaN(b) ? NaN : b ? a / b : 0);
@@ -787,7 +797,8 @@ const PLAYER_METRICS = [
   // Season-total sources (FBref) only; undefined elsewhere, so hidden
   { k: 'yc', l: 'Yellow cards', f: (a) => a.yc, p90: true, d: 2 },
   { k: 'onGD', l: 'Team goal difference while on the pitch', f: (a) => (has(a.onG) && has(a.onGA) ? a.onG - a.onGA : NaN), p90: true, d: 2 },
-  { k: 'ppm', l: 'Team points per match played', f: (a) => a.ppm, d: 2 },
+  // ppm: FBref gives the rate; per-match sources give points per appearance (ptsP over n)
+  { k: 'ppm', l: 'Team points per match played', f: (a) => (has(a.ppm) ? a.ppm : has(a.ptsP) && a.n ? a.ptsP / a.n : NaN), d: 2 },
   { k: 'savePct', l: 'Save %', f: (a) => (a.sota ? (100 * a.saves) / a.sota : NaN), d: 1 },
   { k: 'gaK', l: 'Goals conceded', f: (a) => a.gaK, p90: true, d: 2 },
   { k: 'cs', l: 'Clean sheets', f: (a) => a.cs, d: 0 },

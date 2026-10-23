@@ -217,12 +217,17 @@ function attachFbref(db, teamId, texts) {
     tables++;
     tab.found.forEach((f) => fields.add(f));
     tab.players.forEach((p) => {
-      const id = 'fb-' + teamId + '-' + slug(p.name);
+      const id = playerKey(teamId, p.name); // shared with other sources, so the same player merges
       // Positions come as "DF", "DF,MF" or "DFMF": the first one decides the group
       const codes = p.pos.toUpperCase().match(/GK|DF|MF|FW/g) || [];
       const code = codes[0] || '', role = codes.length ? codes.join('/') : p.pos || null;
-      if (!db.players[id]) db.players[id] = { id, team: teamId, name: p.name, num: null, group: FB_GROUP[code] || 'MID', role, nation: p.nat };
-      else if (p.pos) { db.players[id].role = role; db.players[id].group = FB_GROUP[code] || db.players[id].group; }
+      const ex = db.players[id];
+      if (!ex) db.players[id] = { id, team: teamId, name: p.name, num: null, group: FB_GROUP[code] || 'MID', role, nation: p.nat };
+      else {
+        if (p.nat) ex.nation = p.nat;
+        // Line-up data (exact positions such as RB) beats FBref's broad DF/MF
+        if (p.pos && !ex.fromLineups) { ex.role = role; ex.group = FB_GROUP[code] || ex.group; }
+      }
       let s = db.seasonPS[id];
       if (!s) { s = blankPlayer(); Object.keys(s).forEach((k) => { if (!['n', 'min', 'st'].includes(k)) s[k] = NaN; }); db.seasonPS[id] = s; }
       Object.entries(p.stats).forEach(([k, v]) => {

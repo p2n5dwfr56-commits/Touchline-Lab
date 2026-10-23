@@ -432,11 +432,11 @@ function renderChrome() {
   const compSel = hasCups(S.team) ? h('div', { class: 'field' }, h('label', { for: 'f-comp', text: 'Competition' }),
     h('select', { id: 'f-comp', title: 'Applies to results, form, matches, formations and opponents. Team stats and the league table are league only.', onchange: (e) => { S.comp = e.target.value; render(); } },
       [['all', 'All competitions'], ['league', 'League only'], ['cups', 'Cups only']].map(([v, l]) => h('option', { value: v, selected: S.comp === v, text: l })))) : null;
-  filtersEl.replaceChildren(
+  filtersEl.replaceChildren(...[
     h('div', { class: 'field' }, h('label', { for: 'f-team', text: 'Team' }), teamSel),
     compSel,
     h('div', { class: 'field' }, h('label', { for: 'f-venue', text: 'Venue' }), venueSel),
-    h('div', { class: 'field' }, h('label', { for: 'f-range', text: 'Matches' }), rangeSel));
+    h('div', { class: 'field' }, h('label', { for: 'f-range', text: 'Matches' }), rangeSel)].filter(Boolean));
   tabsEl.replaceChildren(...TABS.map(([k, l]) => h('button', { role: 'tab', 'aria-selected': String(S.tab === k), onclick: () => { S.tab = k; try { history.replaceState(null, '', '#' + k); } catch (e) {} render(); window.scrollTo({ top: 0 }); }, text: l })));
 }
 function render() {
@@ -687,12 +687,15 @@ function profileTable(T) {
 }
 
 /* ---------- Players ---------- */
+// Players with per-match stats (e.g. from Sportmonks), whose numbers follow the match filters
+const perMatchPids = () => memo('pmp', () => new Set(DB.matches.flatMap((m) => Object.keys(m.ps || {}))));
+const ppmOf = (a) => PLAYER_METRICS.find((m) => m.k === 'ppm').f(a);
 const PCOLS = [
   ['min', 'Min', (a) => a.min, 0, false], ['g', 'G', (a) => a.g, 2], ['xg', 'xG', (a) => a.xg, 2], ['ast', 'A', (a) => a.ast, 2], ['xa', 'xA', (a) => a.xa, 2], ['sh', 'Sh', (a) => a.sh, 2],
   ['key', 'KP', (a) => a.key, 2], ['pct', 'Pass%', (a) => 100 * safe(a.pc, a.pa), 0, false], ['prog', 'PrgP', (a) => a.prog, 2], ['progC', 'PrgC', (a) => a.progC, 2],
   ['drbW', 'Drb', (a) => a.drbW, 2], ['tkl', 'Tkl', (a) => a.tkl, 2], ['int', 'Int', (a) => a.int, 2], ['rec', 'Rec', (a) => a.rec, 2], ['duel', 'Duel%', (a) => 100 * safe(a.duelW, a.duel), 0, false], ['touch', 'Touch', (a) => a.touch, 1],
   ['rating', 'Rtg', (a) => (a.rtN ? a.rt / a.rtN : NaN), 2, false],
-  ['yc', 'Yel', (a) => a.yc, 2], ['onGD', '+/−', (a) => (has(a.onG) && has(a.onGA) ? a.onG - a.onGA : NaN), 2], ['ppm', 'PPM', (a) => a.ppm, 2, false],
+  ['yc', 'Yel', (a) => a.yc, 2], ['onGD', '+/−', (a) => (has(a.onG) && has(a.onGA) ? a.onG - a.onGA : NaN), 2], ['ppm', 'PPM', (a) => ppmOf(a), 2, false],
   ['savePct', 'Sv%', (a) => (a.sota ? (100 * a.saves) / a.sota : NaN), 1, false], ['cs', 'CS', (a) => a.cs, 0, false],
 ];
 const PCOL_TIPS = { min: 'Minutes', g: 'Goals', xg: 'Expected goals', ast: 'Assists', xa: 'Expected assists', sh: 'Shots', key: 'Key passes', pct: 'Pass completion', prog: 'Progressive passes', progC: 'Progressive carries', drbW: 'Successful dribbles', tkl: 'Tackles', int: 'Interceptions', rec: 'Ball recoveries', duel: 'Duels won', touch: 'Touches', rating: 'Average match rating', yc: 'Yellow cards', onGD: 'Team goal difference while on the pitch', ppm: 'Team points per match played', savePct: 'Save percentage', cs: 'Clean sheets' };
@@ -723,7 +726,7 @@ function viewPlayers(el) {
         const d = c[4] === false ? c[3] : S.per90 ? 2 : c[0] === 'xg' || c[0] === 'xa' ? 1 : 0;
         return h('td', { text: c[0] === 'onGD' ? signed(colVal(c, r.a), d) : fmt(colVal(c, r.a), d) });
       })))));
-  const fbOnly = DB.seasonPS && rows.some((r) => DB.seasonPS[r.p.id]);
+  const fbOnly = DB.seasonPS && rows.some((r) => DB.seasonPS[r.p.id]) && !rows.some((r) => perMatchPids().has(r.p.id)); // no per-match stats: FBref season totals
   el.append(card({ title: 'Squad', tools }, `${teamName(T)} · ${fbOnly ? 'season totals from FBref' : rangeLabel()} · ${S.per90 ? 'per 90 minutes' : 'totals'} · click a column to sort, a row to open the player`, h('div', { class: 'tbl-wrap' }, t)));
 }
 function peerPool(group) {
@@ -814,11 +817,11 @@ function playerProfile(pid, ms) {
   // Only show the numbers this data source actually has
   const gk = p.group === 'GK';
   const items = gk
-    ? [[a.min, 'Minutes', 0], [a.st, 'Starts', 0], [a.sota ? (100 * a.saves) / a.sota : NaN, 'Save %', 1, '%'], [a.saves, 'Saves', 0], [a.gaK, 'Conceded', 0], [a.cs, 'Clean sheets', 0], [a.rtN ? a.rt / a.rtN : NaN, 'Avg rating', 2], [100 * safe(a.pc, a.pa), 'Pass completion', 0, '%'], [a.ppm, 'Team pts / match', 2]]
+    ? [[a.min, 'Minutes', 0], [a.st, 'Starts', 0], [a.sota ? (100 * a.saves) / a.sota : NaN, 'Save %', 1, '%'], [a.saves, 'Saves', 0], [a.gaK, 'Conceded', 0], [a.cs, 'Clean sheets', 0], [a.rtN ? a.rt / a.rtN : NaN, 'Avg rating', 2], [100 * safe(a.pc, a.pa), 'Pass completion', 0, '%'], [ppmOf(a), 'Team pts / match', 2]]
     : [[a.min, 'Minutes', 0], [a.st, 'Starts', 0], [a.g, 'Goals', 0], [a.xg, 'xG', 1], [a.sh, 'Shots', 0], [a.ast, 'Assists', 0], [a.xa, 'xA', 1], [a.rtN ? a.rt / a.rtN : NaN, 'Avg rating', 2], [100 * safe(a.pc, a.pa), 'Pass completion', 0, '%'], [a.tkl + a.int, 'Tackles + int', 0],
-      [has(a.onG) && has(a.onGA) ? a.onG - a.onGA : NaN, 'On-pitch +/−', 0, '', true], [a.ppm, 'Team pts / match', 2]];
+      [has(a.onG) && has(a.onGA) ? a.onG - a.onGA : NaN, 'On-pitch +/−', 0, '', true], [ppmOf(a), 'Team pts / match', 2]];
   const stats = h('div', { class: 'statline' }, items.filter(([v]) => has(v)).map(([v, l, d, u, sg]) => h('div', null, h('b', { text: (sg ? signed(v, d) : fmt(v, d)) + (u || '') }), h('span', { text: l }))));
-  const span = DB.seasonPS && DB.seasonPS[pid] ? 'Season totals from FBref' : rangeLabel();
+  const span = DB.seasonPS && DB.seasonPS[pid] && !perMatchPids().has(pid) ? 'Season totals from FBref' : rangeLabel();
   if (!DB.hasEvents) {
     return card({ title: 'Player profile', span: true }, span, head, stats,
       h('div', { class: 'grid' }, h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '6px' }, text: 'Percentile vs league ' + GROUP_NAME[p.group].toLowerCase() + 's · per 90' }), pctBars([pid], [A])),
@@ -951,7 +954,7 @@ function matchReport(m, T) {
     h('div', null, h('div', { class: 'tn', style: { color: colOf(home) }, text: teamName(home) }), h('div', { class: 'xgs', text: [m.forms[home], has(m.ts[home].xg) ? m.ts[home].xg.toFixed(2) + ' xG' : null].filter(Boolean).join(' · ') })),
     h('div', { class: 'sc', text: m.hg + '–' + m.ag }, m.pens ? h('div', { class: 'xgs', style: { textAlign: 'center' }, text: `${m.pens.f}–${m.pens.a} on penalties` }) : null),
     h('div', null, h('div', { class: 'tn r', style: { color: colOf(away) }, text: teamName(away) }), h('div', { class: 'xgs', style: { textAlign: 'right' }, text: [has(m.ts[away].xg) ? m.ts[away].xg.toFixed(2) + ' xG' : null, m.forms[away]].filter(Boolean).join(' · ') }))));
-  const scorers = (id) => m.timeline ? m.timeline.filter((t) => t.kind === 'goal' && t.team === id).map((t) => (DB.players[t.pl] ? DB.players[t.pl].name.split(' ').pop() : '?') + ' ' + t.min + "'" + (/penalty/i.test(t.detail) ? ' (p)' : /own/i.test(t.detail) ? ' (og)' : '')).join(', ') : m.events.filter((e) => e.type === 'shot' && e.out === 'goal' && e.team === id).map((e) => DB.players[e.pl].name.split(' ').pop() + ' ' + Math.floor(e.t / 60 + 1) + "'" + (e.sp === 'pen' ? ' (p)' : '')).join(', ');
+  const scorers = (id) => m.timeline ? m.timeline.filter((t) => t.kind === 'goal' && t.team === id).map((t) => (DB.players[t.pl] ? DB.players[t.pl].name.split(' ').pop() : t.ogName ? t.ogName.split(' ').pop() : '?') + ' ' + t.min + "'" + (/penalty/i.test(t.detail) ? ' (p)' : /own/i.test(t.detail) ? ' (og)' : '')).join(', ') : m.events.filter((e) => e.type === 'shot' && e.out === 'goal' && e.team === id).map((e) => DB.players[e.pl].name.split(' ').pop() + ' ' + Math.floor(e.t / 60 + 1) + "'" + (e.sp === 'pen' ? ' (p)' : '')).join(', ');
   wrap.append(h('div', { class: 'scoreboard', style: { marginBottom: '16px' } }, h('div', { class: 'sub', text: scorers(home) }), h('div'), h('div', { class: 'sub', style: { textAlign: 'right' }, text: scorers(away) })));
   const grid = h('div', { class: 'grid' });
   wrap.append(grid);
@@ -1012,7 +1015,7 @@ function matchTimeline(m, T, colA, colB) {
   const name = (id) => (DB.players[id] ? DB.players[id].name : '?');
   return h('ol', { class: 'timeline' }, items.map((t) => {
     const icon = { goal: 'Goal', yellow: 'Yellow', red: 'Red', sub: 'Sub' }[t.kind];
-    const text = t.kind === 'goal' ? name(t.pl) + (t.as ? ' (assist ' + name(t.as).split(' ').pop() + ')' : '') + (/penalty/i.test(t.detail) ? ' · penalty' : /own/i.test(t.detail) ? ' · own goal' : '')
+    const text = t.kind === 'goal' ? (t.pl ? name(t.pl) : t.ogName || '?') + (t.as ? ' (assist ' + name(t.as).split(' ').pop() + ')' : '') + (/penalty/i.test(t.detail) ? ' · penalty' : /own/i.test(t.detail) ? ' · own goal' : '')
       : t.kind === 'sub' ? name(t.pl) + ' on for ' + name(t.as) : name(t.pl);
     return h('li', { class: 'tl-' + t.kind + (t.team === T ? '' : ' opp') },
       h('span', { class: 'tl-min', text: t.min + "'" }), h('span', { class: 'tl-dot', style: { background: t.team === T ? colA : colB } }),
@@ -1087,6 +1090,25 @@ function addFbref(texts, teamId, statusEl, opts = {}) {
   flash('Added ' + parts.join('. ') + '.' + (r.errors.length ? ' ' + r.errors.join(' ') : '') + ' Paste more FBref tables in the Data tab to fill in more.');
   return true;
 }
+// Attach Sportmonks downloads (line-ups, events, per-player match stats) to the loaded season
+function addSportmonks(files, statusEl, opts = {}) {
+  const say = (msg) => { if (statusEl) { statusEl.className = 'status err'; statusEl.textContent = msg; } return false; };
+  if (DB.source === 'demo') return say('Load the season file first (for example this season’s football-data.co.uk file), then add the Sportmonks file to it.');
+  let last = null;
+  for (const f of files) {
+    const r = attachSportmonks(DB, f.data);
+    if (!r.matched) return say(`None of the ${r.finished} matches in ${f.name} match the loaded season (${DB.label}). Check it is the same league and season.`);
+    last = r;
+  }
+  cache.clear();
+  if (opts.restore) return true;
+  if (!opts.nosave) saveLayers(files.map((f) => ({ name: f.name, text: f.text })));
+  S.player = null; S.form = null; S.tab = 'players'; S.sort = 'min';
+  render();
+  flash(`Added Sportmonks data for ${last.matched} of ${last.finished} matches: line-ups, formations, goals, assists, cards, substitutions and player match stats for every club` +
+    (last.upcoming ? `, plus ${last.upcoming} upcoming fixtures` : '') + (last.unmatched.length ? `. Not matched: ${last.unmatched.slice(0, 3).join('; ')}` : '') + '.');
+  return true;
+}
 function fbrefCard() {
   const st = h('div', { class: 'status', role: 'status' });
   if (DB.source === 'demo') return card('Player stats from FBref', 'Season totals for each player', h('p', { class: 'note', style: { marginTop: 0 }, text: 'Load a real season first (this season’s football-data.co.uk file is quickest). Then come back here to add FBref player stats to Aberdeen or any other team.' }));
@@ -1111,15 +1133,21 @@ function importTexts(texts, statusEl, opts = {}) {
   const fail = (msg) => { if (statusEl) { statusEl.className = 'status err'; statusEl.textContent = msg; } return false; };
   const prevSnap = DB && DB.snapshot ? DB.label : null; // replacing the built-in snapshot with a newer file for the same season
   // CSV files (football-data.co.uk) and JSON files (API-Football, StatsBomb) are told apart by content.
-  const csv = [], parsed = [], fb = [];
+  const csv = [], parsed = [], fb = [], sm = [];
   texts.forEach((f) => {
     const t = f.text.replace(/^﻿/, '').trimStart();
-    if (t[0] === '[' || t[0] === '{') parsed.push({ name: f.name, data: JSON.parse(t) });
+    if (t[0] === '[' || t[0] === '{') { const data = JSON.parse(t); if (smIsBundle(data)) sm.push({ name: f.name, text: f.text, data }); else parsed.push({ name: f.name, data }); }
     else if (fdIsCSV(fdParseCSV(t))) csv.push({ name: f.name, rows: fdParseCSV(t) });
     else if (fbIsTable(fbParse(t)) || fbIsFixtures(fbParse(t)) || fbIsRecords(fbParse(t))) fb.push({ name: f.name, text: t });
   });
-  if (!csv.length && !parsed.length && !fb.length) return fail('These files are not in a format Touchline Lab reads. Use a football-data.co.uk CSV, an FBref player table, the API-Football download, or StatsBomb event files.');
-  if (!csv.length && !parsed.length) return addFbref(fb, S.team, statusEl, opts); // FBref tables add to the season already loaded
+  if (!csv.length && !parsed.length && !fb.length && !sm.length) return fail('These files are not in a format Touchline Lab reads. Use a football-data.co.uk CSV, an FBref player table, the Sportmonks or API-Football download, or StatsBomb event files.');
+  // FBref tables and Sportmonks files add to the season already loaded
+  if (!csv.length && !parsed.length) {
+    let ok = true;
+    if (fb.length) ok = addFbref(fb, S.team, statusEl, { ...opts, quiet: sm.length > 0 }) && ok;
+    if (sm.length) ok = addSportmonks(sm, statusEl, opts) && ok;
+    return ok;
+  }
   const kind = csv.length ? 'fd' : isApiFootball(parsed) ? 'af' : 'sb';
   const { db, errors } = kind === 'fd' ? importFootballData(csv) : kind === 'af' ? importApiFootball(parsed) : importStatsBomb(parsed);
   if (!db.matches.length) {
@@ -1135,6 +1163,7 @@ function importTexts(texts, statusEl, opts = {}) {
   S.cmp = (DB.teams.find((t) => t.id !== S.team) || DB.teams[0]).id;
   S.range = 'season'; S.player = null; S.match = null; S.pA = null; S.pB = null;
   if (fb.length) addFbref(fb, S.team, statusEl, { ...opts, nosave: true, restore: true });
+  if (sm.length) addSportmonks(sm, statusEl, { restore: true }); // dropped together with the season file
   if (opts.restore) return true;
   if (errors.length && kind === 'fd') flash(errors[0], 'err');
   S.tab = fb.length ? 'players' : 'overview';
@@ -1144,16 +1173,19 @@ function importTexts(texts, statusEl, opts = {}) {
   carriedFbref(label).then(async (keep) => {
     if (!keep.length && prevSnap === label) keep = snapshotFbref(DB); // keep the built-in FBref tables too
     const man = await carriedManual(label);
-    if ((keep.length || man.length) && DB === thisDB) {
+    let lay = await carriedLayers(label);
+    if (!lay.length && prevSnap === label && SNAP) lay = (SNAP.layers || []).slice(); // keep the built-in Sportmonks data too
+    if ((keep.length || man.length || lay.length) && DB === thisDB) {
       keep.forEach((f) => { if (DB.teamById[f.team]) addFbref(f.texts, f.team, null, { restore: true }); });
+      applyLayers(lay);
       man.forEach((e) => applyManual(DB, e));
       DB.manual = man.slice();
       cache.clear();
       render();
-      const kept = [keep.length ? `${keep.length} FBref table${keep.length > 1 ? 's' : ''}` : '', man.length ? `${man.length} match${man.length > 1 ? 'es' : ''} you added` : ''].filter(Boolean).join(' and ');
-      flash(`Updated ${label}. Your ${kept} ${keep.length + man.length > 1 ? 'were' : 'was'} added back.`);
+      const kept = [keep.length ? `${keep.length} FBref table${keep.length > 1 ? 's' : ''}` : '', lay.length ? 'Sportmonks data' : '', man.length ? `${man.length} match${man.length > 1 ? 'es' : ''} you added` : ''].filter(Boolean).join(', ');
+      flash(`Updated ${label}. Your ${kept} ${keep.length + man.length + lay.length > 1 ? 'were' : 'was'} added back.`);
     }
-    const ok = await savePrimary(texts, label, keep, man);
+    const ok = await savePrimary(texts, label, keep, man, lay);
     if (S.tab === 'data') render();
     if (!ok) flash('Loaded, but this browser would not save it, so it will be gone when you reload the page.', 'err');
   });
@@ -1251,6 +1283,8 @@ function savedPanel() {
   const when = new Date(m.savedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   const what = [m.label || m.files.join(', ')];
   if (m.fbTables) what.push(`${m.fbTables} FBref table${m.fbTables > 1 ? 's' : ''} (${m.fbTeams.join(', ')})`);
+  if (m.layers && m.layers.length) what.push('Sportmonks data');
+  if (m.manual) what.push(`${m.manual} match${m.manual > 1 ? 'es' : ''} you added`);
   let armed = false;
   const btn = h('button', { class: 'btn ghost', type: 'button', text: 'Forget saved data' });
   btn.addEventListener('click', async () => {
@@ -1301,6 +1335,13 @@ function viewData(el) {
   el.append(h('div', { class: 'grid' },
     card('Data source', DB.label + (DB.snapshot ? ` · built-in data to ${fmtDate(DB.snapshot)}` : ''), prose, sourceSwitch()),
     fbrefCard(),
+    card('Line-ups and player stats from Sportmonks', 'Free plan: Scottish Premiership, every club, every match', h('div', { class: 'prose' },
+      h('ol', null,
+        h('li', null, 'Create a free account at ', h('a', { href: 'https://my.sportmonks.com', target: '_blank', rel: 'noopener', text: 'my.sportmonks.com' }), ' and an API token.'),
+        h('li', null, 'Install ', h('a', { href: 'https://nodejs.org', target: '_blank', rel: 'noopener', text: 'Node.js' }), ' (18 or newer), download the Touchline Lab repository, and in its folder run:', h('pre', { class: 'cmd', text: 'SPORTMONKS_TOKEN=your_token node tools/fetch-sportmonks.mjs' }), 'On Windows PowerShell: ', h('code', { text: '$env:SPORTMONKS_TOKEN="your_token"' }), ' first, then the node command.'),
+        h('li', null, 'Drop the saved ', h('code', { text: 'sportmonks-501-<season>.json' }), ' into the import box, after the season file. Run it again after each round to update.')),
+      h('p', null, 'Adds starting line-ups with positions, formations, goals with assists, cards, substitutions and per-player match stats (minutes, touches, passes, key passes, shots, tackles, interceptions, recoveries, duels, dribbles, saves and ratings) for every club. Player stats then follow the match filters, and percentiles compare against the whole league.'),
+      h('p', null, 'The free plan covers the Premiership only, not the League Cup or Scottish Cup, and has no xG (football-data.co.uk provides team xG).'))),
     addMatchCard(),
     card('This season from football-data.co.uk', 'Free, no account or key · results, team stats and odds', h('div', { class: 'prose' },
       h('ol', null,
