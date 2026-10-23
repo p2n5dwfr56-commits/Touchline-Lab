@@ -1311,6 +1311,7 @@ function importTexts(texts, statusEl, opts = {}) {
   texts.forEach((f) => {
     const t = f.text.replace(/^﻿/, '').trimStart();
     if (t[0] === '[' || t[0] === '{') { const data = JSON.parse(t); if (smIsBundle(data)) sm.push({ name: f.name, text: f.text, data }); else if (data && data.source === 'touchline-events') evb.push(data); else if (isAttendanceFile(data)) att.push({ name: f.name, text: f.text, data }); else parsed.push({ name: f.name, data }); }
+    else if (isAttendanceCSV(t)) { const data = attendanceCSV(t); att.push({ name: f.name, text: JSON.stringify(data), data }); }
     else if (fdIsCSV(fdParseCSV(t))) csv.push({ name: f.name, rows: fdParseCSV(t) });
     else if (fbIsHistory(t) || fbIsLeagueTable(t) || fbIsWikiAttendance(t) || fbIsTable(fbParse(t)) || fbIsFixtures(fbParse(t)) || fbIsRecords(fbParse(t))) fb.push({ name: f.name, text: t });
   });
@@ -1320,7 +1321,7 @@ function importTexts(texts, statusEl, opts = {}) {
     if (!opts.restore) Promise.all(att.map((f) => saveAttendanceFile(f))).then((ok) => { if (ok.includes(false)) flash('Loaded, but this browser would not save the attendance file.', 'err'); });
     cache.clear();
     S.tab = 'seasons'; render();
-    flash(`Added average home attendances for ${r.reduce((a, x) => a + x.seasons, 0)} seasons from Wikipedia (see Home attendances in the Seasons tab).`);
+    flash(`Added average home attendances for ${r.reduce((a, x) => a + x.seasons, 0)} seasons (${r.reduce((a, x) => a + x.entries, 0)} club figures; see Home attendances in the Seasons tab).`);
     return true;
   }
   // Event data (from tools/fetch-statsbomb.mjs): shown for this visit, not saved, so saved season data stays as it is

@@ -293,10 +293,38 @@ function addAttendanceFile(d) {
   let n = 0;
   Object.entries(d.seasons || {}).forEach(([season, clubs]) => {
     const S0 = (ATT[season] = ATT[season] || {});
-    Object.entries(clubs || {}).forEach(([name, att]) => { const k = fbTeamKey(name); if (Number.isFinite(att) && att > 0 && !S0[k]) { S0[k] = { name, att, src: 'wikipedia' }; n++; } });
+    const mine = d.from === 'your CSV'; // your own figures replace what is loaded; Wikipedia only fills gaps
+    Object.entries(clubs || {}).forEach(([name, att]) => { const k = fbTeamKey(name); if (Number.isFinite(att) && att > 0 && (mine || !S0[k])) { S0[k] = { name: S0[k] && !mine ? S0[k].name : name, att, src: mine ? 'csv' : 'wikipedia' }; n++; } });
   });
   return { seasons: Object.keys(d.seasons || {}).length, entries: n };
 }
+// An attendance CSV in either layout: Season,Club,Average rows, or Club plus one column per season.
+// Returns an attendance-file object, or null when the text isn't one.
+const attSeason = (v) => {
+  const m = String(v || '').trim().match(/^(\d{4})\s*[-–/]\s*(\d{2}|\d{4})$/);
+  if (m) { const y = +m[1], e = +m[2].slice(-2); return (y + 1) % 100 === e ? y + '/' + String(e).padStart(2, '0') : ''; }
+  const y = String(v || '').trim().match(/^(\d{4})$/); // a single year means the season ending that year
+  return y ? (+y[1] - 1) + '/' + y[1].slice(2) : '';
+};
+function attendanceCSV(text) {
+  const rows = fdParseCSV(String(text || '').replace(/^\uFEFF/, '')).map((r) => r.map((c) => String(c || '').trim())).filter((r) => r.some(Boolean));
+  if (rows.length < 2) return null;
+  const H = rows[0], low = H.map((c) => c.toLowerCase());
+  const iClub = low.findIndex((c) => /^(club|team|squad|name)$/.test(c));
+  const num = (v) => { const n = parseInt(String(v || '').replace(/[^0-9]/g, ''), 10); return Number.isFinite(n) && n > 0 ? n : null; };
+  const seasons = {};
+  const put = (season, club, att) => { if (season && club && att) (seasons[season] = seasons[season] || {})[club] = att; };
+  const iSeason = low.findIndex((c) => /^season$/.test(c)), iAvg = low.findIndex((c) => /average|^avg|attendance|^att$|crowd/.test(c));
+  if (iClub >= 0 && iSeason >= 0 && iAvg >= 0) rows.slice(1).forEach((r) => put(attSeason(r[iSeason]), r[iClub], num(r[iAvg])));
+  else if (iClub >= 0) {
+    const cols = H.map((c, i) => [i, attSeason(c)]).filter(([i, k]) => i !== iClub && k);
+    if (cols.length < 2) return null;
+    rows.slice(1).forEach((r) => cols.forEach(([i, k]) => put(k, r[iClub], num(r[i]))));
+  } else return null;
+  return Object.keys(seasons).length ? { source: 'touchline-attendance', from: 'your CSV', seasons } : null;
+}
+const isAttendanceCSV = (text) => !!attendanceCSV(text) && !fdIsCSV(fdParseCSV(text));
+
 function noteHistoryAttendance(db) {
   Object.entries(db.fbHistory || {}).forEach(([key, Hh]) => Object.entries(Hh.league || {}).forEach(([season, f]) => {
     if (f.att == null || f.att <= 0) return;
