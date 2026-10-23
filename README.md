@@ -24,11 +24,13 @@ belongs to that browser on that device.
 - `src/footballdata.js` – football-data.co.uk CSV importer (results, team match stats, odds)
 - `src/fbref.js` – FBref player table importer (season totals per player)
 - `src/sportmonks.js` – Sportmonks importer (line-ups, events, player match stats), added on top of a season
+- `src/pressing.js` – Without the ball tab: ball winning, losses of the ball, time to win it back, 360 positions
 - `src/opponents.js` – Opponents tab: record against each club, this season and all-time
 - `src/store.js` – saves imports in the browser and restores them on open; built-in snapshot
 - `tools/embed-snapshot.mjs` – used by `build.sh --with-snapshot`
 - `tools/fetch-api-football.mjs` – downloads a season from API-Football into one file
 - `tools/fetch-sportmonks.mjs` – downloads a Sportmonks season into one file
+- `tools/fetch-statsbomb.mjs` – downloads StatsBomb Open Data matches (events + 360) into one file
 - `src/style.css`, `src/head.html` – styling and page head
 
 ## Data
@@ -96,3 +98,30 @@ SPORTMONKS_TOKEN=your_token node tools/fetch-sportmonks.mjs   # league 501, curr
 Load the football-data.co.uk CSV first, then drop the saved `sportmonks-501-<season>.json` into
 the Data tab. Matches are paired by teams and date. Re-run after each round for new matches. The
 free plan allows 180 requests an hour; a season takes about 10.
+
+## Without the ball
+The **Without the ball** tab has two parts.
+
+**Ball winning** works with any source that has tackles and interceptions (Sportmonks, API-Football,
+StatsBomb): a league table of ball wins (tackles + interceptions + recoveries), duels, fouls,
+opponent pass completion and opponent passes per defensive action, ball wins by match, and each
+player's ball wins per 90 with a league percentile.
+
+**After losing the ball** needs event data with locations. A loss is counted event by event: a
+team has the ball and the next team to control it is the opponent, with no stoppage in between
+(a ball that goes out is not a loss, and shots are not counted). For each loss it records where it
+happened, how long it took to win the ball back, and whether the opponent had a shot within 20
+seconds. With StatsBomb 360 data it also shows where every player in the camera's view was at the
+moment of the loss: team-mates behind the ball and within 10 yards. (360 data includes only players
+in the broadcast view, so counts of players far from the ball run low.) No free source has this
+for the Scottish Premiership, so the snapshot build includes StatsBomb's Euro 2024 Group A
+(Scotland, Germany, Hungary, Switzerland) as a sample.
+
+```sh
+node tools/fetch-statsbomb.mjs --list                          # competitions; [360] marks player positions
+node tools/fetch-statsbomb.mjs --competition 55 --season 282    # Euro 2024, all 51 matches
+```
+
+Drop the saved file into the Data tab. Event data is shown for that visit and not saved, so saved
+season data stays. For the snapshot build, the sample comes from `data/sample/` via the
+manifest's `sample` entry. Data: [StatsBomb Open Data](https://github.com/statsbomb/open-data).

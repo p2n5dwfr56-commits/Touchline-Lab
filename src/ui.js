@@ -8,9 +8,9 @@ const S = {
   tab: 'overview', team: 'ABE', venue: 'all', range: 'season', cmp: 'CEL',
   heat: 'all', shots: 'for', group: 'all', per90: true, sort: 'min', player: null,
   cmpMode: 'teams', pA: null, pB: null, match: null, act: 'pass', form: null, shape: 'plan',
-  opp: null, oppSort: 'next', oppScope: 'league', comp: 'all',
+  opp: null, oppSort: 'next', oppScope: 'league', comp: 'all', loss: null, lossShow: 'shot', bwSort: 'wins',
 };
-const TABS = [['overview', 'Overview'], ['team', 'Team analysis'], ['tactics', 'Tactics'], ['players', 'Players'], ['compare', 'Compare'], ['opponents', 'Opponents'], ['matches', 'Matches'], ['data', 'Data']];
+const TABS = [['overview', 'Overview'], ['team', 'Team analysis'], ['press', 'Without the ball'], ['tactics', 'Tactics'], ['players', 'Players'], ['compare', 'Compare'], ['opponents', 'Opponents'], ['matches', 'Matches'], ['data', 'Data']];
 
 /* ---------- DOM helpers ---------- */
 function h(tag, a, ...kids) {
@@ -417,7 +417,7 @@ function buildShell() {
 function renderChrome() {
   chipEl.className = 'chip' + (DB.source === 'demo' ? '' : ' real');
   chipEl.replaceChildren(h('span', { class: 'dot' }), DB.source === 'demo' ? 'Synthetic demo data · invented players' : DB.label + (DB.snapshot ? ' · to ' + fmtDate(DB.snapshot) : ''));
-  chipEl.title = DB.source === 'demo' ? 'Generated sample season. Switch to real data in the Data tab.' : DB.snapshot ? 'Built-in snapshot. Import newer files in the Data tab to update it.' : '';
+  chipEl.title = DB.source === 'demo' ? 'Generated sample season. Switch to real data in the Data tab.' : DB.source === 'sample' ? 'Data: StatsBomb Open Data (github.com/statsbomb/open-data). Back to your data in the Data tab.' : DB.snapshot ? 'Built-in snapshot. Import newer files in the Data tab to update it.' : '';
   const teamSel = h('select', { id: 'f-team', onchange: (e) => { S.team = e.target.value; if (S.cmp === S.team) S.cmp = DB.teams.find((t) => t.id !== S.team).id; if (S.range.startsWith('m:')) S.range = 'season'; S.player = null; S.match = null; S.form = null; render(); } },
     DB.teams.map((t) => h('option', { value: t.id, selected: t.id === S.team, text: t.name })));
   const ms = teamMatches(S.team);
@@ -444,7 +444,7 @@ function render() {
   hideTip();
   renderChrome();
   mainEl.replaceChildren();
-  const views = { overview: viewOverview, team: viewTeam, tactics: viewTactics, players: viewPlayers, compare: viewCompare, opponents: viewOpponents, matches: viewMatches, data: viewData };
+  const views = { overview: viewOverview, team: viewTeam, press: viewPress, tactics: viewTactics, players: viewPlayers, compare: viewCompare, opponents: viewOpponents, matches: viewMatches, data: viewData };
   (views[S.tab] || viewOverview)(mainEl);
 }
 
@@ -1133,13 +1133,24 @@ function importTexts(texts, statusEl, opts = {}) {
   const fail = (msg) => { if (statusEl) { statusEl.className = 'status err'; statusEl.textContent = msg; } return false; };
   const prevSnap = DB && DB.snapshot ? DB.label : null; // replacing the built-in snapshot with a newer file for the same season
   // CSV files (football-data.co.uk) and JSON files (API-Football, StatsBomb) are told apart by content.
-  const csv = [], parsed = [], fb = [], sm = [];
+  const csv = [], parsed = [], fb = [], sm = [], evb = [];
   texts.forEach((f) => {
     const t = f.text.replace(/^﻿/, '').trimStart();
-    if (t[0] === '[' || t[0] === '{') { const data = JSON.parse(t); if (smIsBundle(data)) sm.push({ name: f.name, text: f.text, data }); else parsed.push({ name: f.name, data }); }
+    if (t[0] === '[' || t[0] === '{') { const data = JSON.parse(t); if (smIsBundle(data)) sm.push({ name: f.name, text: f.text, data }); else if (data && data.source === 'touchline-events') evb.push(data); else parsed.push({ name: f.name, data }); }
     else if (fdIsCSV(fdParseCSV(t))) csv.push({ name: f.name, rows: fdParseCSV(t) });
     else if (fbIsTable(fbParse(t)) || fbIsFixtures(fbParse(t)) || fbIsRecords(fbParse(t))) fb.push({ name: f.name, text: t });
   });
+  // Event data (from tools/fetch-statsbomb.mjs): shown for this visit, not saved, so saved season data stays as it is
+  if (evb.length) {
+    DB = eventsDB(evb[0]); DB.source = 'import'; DB.transient = true;
+    cache.clear();
+    S.team = DB.teams[0].id; S.cmp = (DB.teams[1] || DB.teams[0]).id;
+    S.range = 'season'; S.player = null; S.match = null; S.pA = S.pB = null; S.form = null; S.opp = null; S.loss = null; S.comp = 'all';
+    S.tab = 'press';
+    render();
+    flash(`Loaded ${evb[0].label}: ${DB.matches.length} matches with every event${evb[0].with360 ? ` (${evb[0].with360} with 360 player positions)` : ''}. Event files are not saved in the browser, so your saved data comes back when you reload. Data: ${evb[0].attribution}.`);
+    return true;
+  }
   if (!csv.length && !parsed.length && !fb.length && !sm.length) return fail('These files are not in a format Touchline Lab reads. Use a football-data.co.uk CSV, an FBref player table, the Sportmonks or API-Football download, or StatsBomb event files.');
   // FBref tables and Sportmonks files add to the season already loaded
   if (!csv.length && !parsed.length) {
@@ -1166,8 +1177,9 @@ function importTexts(texts, statusEl, opts = {}) {
   if (sm.length) addSportmonks(sm, statusEl, { restore: true }); // dropped together with the season file
   if (opts.restore) return true;
   if (errors.length && kind === 'fd') flash(errors[0], 'err');
-  S.tab = fb.length ? 'players' : 'overview';
+  S.tab = fb.length ? 'players' : kind === 'sb' ? 'press' : 'overview';
   render();
+  if (kind === 'sb') { DB.transient = true; flash(`Loaded ${DB.matches.length} StatsBomb match${DB.matches.length === 1 ? '' : 'es'}${DB.matches.some((m) => m.events.some((e) => e.ff)) ? ' with 360 player positions' : ''}. Event files are not saved in the browser, so your saved data comes back when you reload.`); return true; }
   // An updated file for the same season keeps the FBref tables already added to it
   const label = DB.label, thisDB = DB;
   carriedFbref(label).then(async (keep) => {
@@ -1261,13 +1273,15 @@ function showDemo() {
 }
 // Switch between the synthetic demo season and real data (saved imports or the built-in snapshot)
 function sourceSwitch() {
-  if (DB.source !== 'demo') {
-    return h('div', { class: 'saved' }, h('div', null, h('b', { text: 'Demo season' }), h('div', { class: 'sub', text: 'Synthetic data with pitch locations, for trying the heatmaps, shot maps and passing networks. Its players are invented.' })),
-      h('button', { class: 'btn ghost', type: 'button', text: 'Switch to demo season', onclick: () => { showDemo(); S.tab = 'overview'; render(); } }));
-  }
-  if (!STORE.meta && !SNAP) return null;
-  return h('div', { class: 'saved' }, h('div', null, h('b', { text: 'Real data' }), h('div', { class: 'sub', text: STORE.meta ? 'Your saved imports' : `Built-in 2026/27 data to ${fmtDate(SNAP.asOf)}` })),
-    h('button', { class: 'btn', type: 'button', text: 'Back to real data', onclick: async () => { if (await loadRealData()) { S.tab = 'overview'; render(); } } }));
+  const rows = [];
+  const onReal = DB.source !== 'demo' && DB.source !== 'sample' && !DB.transient;
+  if (!onReal && (STORE.meta || SNAP)) rows.push(h('div', { class: 'saved' }, h('div', null, h('b', { text: 'Real data' }), h('div', { class: 'sub', text: STORE.meta ? 'Your saved imports' : `Built-in 2026/27 data to ${fmtDate(SNAP.asOf)}` })),
+    h('button', { class: 'btn', type: 'button', text: 'Back to real data', onclick: async () => { if (await loadRealData()) { S.tab = 'overview'; render(); } } })));
+  if (SAMPLE && DB.source !== 'sample') rows.push(h('div', { class: 'saved' }, h('div', null, h('b', { text: 'Event data sample' }), h('div', { class: 'sub', text: SAMPLE.label + ' from StatsBomb’s free data: every pass, shot and tackle with its location, and player positions at each loss of the ball.' })),
+    h('button', { class: 'btn ghost', type: 'button', text: 'Open the sample', onclick: () => { loadSample(); S.tab = 'press'; render(); } })));
+  if (DB.source !== 'demo') rows.push(h('div', { class: 'saved' }, h('div', null, h('b', { text: 'Demo season' }), h('div', { class: 'sub', text: 'Synthetic data with pitch locations, for trying the heatmaps, shot maps and passing networks. Its players are invented.' })),
+    h('button', { class: 'btn ghost', type: 'button', text: 'Switch to demo season', onclick: () => { showDemo(); S.tab = 'overview'; render(); } })));
+  return rows.length ? h('div', { class: 'stack' }, rows) : null;
 }
 function savedPanel() {
   const m = STORE.meta;
@@ -1350,7 +1364,7 @@ function viewData(el) {
       h('p', null, 'You get the league table, form, results, xG, shots, shots on target, corners, fouls and cards per match, plus pre-match odds. The app turns the odds into expected points, so you can see which teams are doing better or worse than the market expected.'),
       h('p', null, 'There are no player stats or line-ups in this file, and older seasons have no xG. The site keeps it updated through the season, so download it again for the latest results.'))),
     card('Import data', 'football-data.co.uk, API-Football or StatsBomb files · they stay in your browser, nothing is uploaded', drop, status, savedPanel(),
-      h('p', { class: 'note', text: 'StatsBomb tip: in the open-data repository, events live in data/events/ and fixtures in data/matches/<competition_id>/<season_id>.json. Load several matches from one competition to unlock league tables and rankings.' })),
+      h('p', { class: 'note' }, 'StatsBomb: the quickest route is ', h('code', { text: 'node tools/fetch-statsbomb.mjs --list' }), ' then ', h('code', { text: 'node tools/fetch-statsbomb.mjs --competition 55 --season 282' }), ' (Euro 2024), which saves one file with every event and the 360 player positions; drop it here. Raw files from the open-data repository also work: events from data/events/, 360 files from data/three-sixty/ and data/matches/<competition_id>/<season_id>.json. Event data is shown for the visit and not saved, so your saved season stays.')),
     card('Real Aberdeen data from API-Football', 'Free plan: seasons 2022/23 to 2024/25, about 95 matches a day', h('div', { class: 'prose' },
       h('ol', null,
         h('li', null, 'Get a free key at ', h('a', { href: 'https://dashboard.api-football.com', target: '_blank', rel: 'noopener', text: 'dashboard.api-football.com' }), '.'),

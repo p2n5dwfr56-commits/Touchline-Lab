@@ -410,21 +410,36 @@ const SB_ROLE = {
   'Right Attacking Midfield': 'RAM', 'Left Attacking Midfield': 'LAM', 'Center Attacking Midfield': 'AM', 'Right Wing': 'RW', 'Left Wing': 'LW',
   'Right Center Forward': 'RS', 'Left Center Forward': 'LS', 'Center Forward': 'ST', 'Secondary Striker': 'ST',
 };
+const sbIs360 = (d) => Array.isArray(d) && d.length > 0 && d[0] && 'event_uuid' in d[0] && 'freeze_frame' in d[0];
+// Keep 360 player positions only where they are used: on-ball events straight after which the
+// other team takes the ball (the moment it is lost). Stored compactly as [x, y, code]:
+// 2 = the player on the ball, 1 = his team-mate, 3 = his goalkeeper, 0 = opponent, 4 = opposing goalkeeper.
+function sbAttachFrames(evs, poss, fm) {
+  const C = evs.filter(isControl);
+  C.forEach((e, i) => {
+    const n = C[i + 1], ff = fm[e.id];
+    if (!n || n.team === e.team || !ff) return;
+    e.ff = ff.map((q) => [+q.location[0].toFixed(1), +q.location[1].toFixed(1), q.actor ? 2 : q.teammate ? (q.keeper ? 3 : 1) : q.keeper ? 4 : 0]);
+  });
+}
 const PLAY_PATTERN = { 'From Corner': 'setpiece', 'From Free Kick': 'setpiece', 'From Throw In': 'throw', 'From Goal Kick': 'gk', 'From Keeper': 'gk', 'From Kick Off': 'kickoff' };
 
 function importStatsBomb(files) {
   // files: [{name, data}] - events arrays (one per match) and optional matches arrays
-  const meta = {};
+  const meta = {}, frames = {};
   files.forEach((f) => {
     if (Array.isArray(f.data) && f.data.length && f.data[0].match_id && f.data[0].home_team) f.data.forEach((m) => (meta[m.match_id] = m));
+    // 360 files (same <match_id>.json name, from three-sixty/): player positions at each event
+    if (sbIs360(f.data)) { const fm = (frames[String(f.name).replace(/\.json$/i, '').replace(/^.*[\\/]/, '')] = {}); f.data.forEach((r) => (fm[r.event_uuid] = r.freeze_frame)); }
   });
+  files = files.filter((f) => !sbIs360(f.data));
   const teams = {}, players = {}, matches = [];
   const tid = (t) => { const id = 't' + t.id; if (!teams[id]) teams[id] = { id, name: t.name, style: null }; return id; };
   const errors = [];
   files.forEach((f) => {
     const d = f.data;
     if (!Array.isArray(d) || !d.length || !d[0].type || !('index' in d[0])) { if (!(Array.isArray(d) && d[0] && d[0].match_id)) errors.push(f.name); return; }
-    const mid = String(f.name).replace(/\.json$/i, '');
+    const mid = String(f.name).replace(/\.json$/i, '').replace(/^.*[\\/]/, '');
     const mm = meta[mid];
     const xi = d.filter((e) => e.type.name === 'Starting XI');
     if (xi.length < 2) { errors.push(f.name); return; }
@@ -526,6 +541,7 @@ function importStatsBomb(files) {
     const byId = {};
     evs.forEach((e) => (byId[e.id] = e));
     evs.forEach((e) => { if (e._shot && byId[e._shot]) e.xa = byId[e._shot].xg; delete e._shot; });
+    if (frames[mid]) sbAttachFrames(evs, poss, frames[mid]);
     const end = Math.max(5400, lastT);
     Object.keys(onAt).forEach((p) => (minutes[p] += end - onAt[p]));
     Object.keys(minutes).forEach((p) => (minutes[p] = Math.round(minutes[p] / 60)));
@@ -544,6 +560,8 @@ const PHASE_OUT = { bu: 'High press', pr: 'Mid block', f3: 'Low block', tr: 'Def
 const DEF_TYPES = { tackle: 1, interception: 1, recovery: 1, clearance: 1, foul: 1, block: 1 };
 const PPDA_TYPES = { tackle: 1, interception: 1, foul: 1 };
 const ON_BALL = { pass: 1, carry: 1, shot: 1, dribble: 1, loss: 1 };
+// Events that show a team has the ball: on-ball actions, recoveries, and won interceptions and tackles
+const isControl = (e) => !!ON_BALL[e.type] || e.type === 'recovery' || ((e.type === 'interception' || e.type === 'tackle') && e.ok);
 const inBox = (x, y) => x > 102 && y > 18 && y < 62;
 function progressive(x, y, ex, ey) {
   if (ex < x) return false;

@@ -8,7 +8,7 @@ if [ "$1" = "--with-snapshot" ]; then OUT=${2:-dist/index-snapshot.html}; SNAP=1
 {
   cat src/head.html; echo '<style>'; cat src/style.css; echo '</style>'; echo '<script>'
   if [ -n "$SNAP" ]; then node tools/embed-snapshot.mjs data/snapshot || exit 1; fi
-  cat src/engine.js src/apifootball.js src/footballdata.js src/fbref.js src/sportmonks.js src/ui.js src/tactics.js src/opponents.js src/store.js
+  cat src/engine.js src/apifootball.js src/footballdata.js src/fbref.js src/sportmonks.js src/ui.js src/tactics.js src/pressing.js src/opponents.js src/store.js
   echo '</script>'
 } > "$OUT"
 echo "built $OUT ($(wc -c < "$OUT") bytes)"

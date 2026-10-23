@@ -4,3 +4,5 @@ api-football-cache/
 api-football-*.json
 data/snapshot/
 dist/index-snapshot.html
+data/sample/
+statsbomb-*.json

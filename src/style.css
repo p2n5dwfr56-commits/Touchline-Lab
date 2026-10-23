@@ -55,7 +55,8 @@ button { cursor: pointer; }
 .bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding-block: 10px; }
 .brand { display: flex; align-items: center; gap: 10px; font-family: var(--font-display); font-weight: 700; font-size: 22px; letter-spacing: 0.04em; text-transform: uppercase; }
 .brand svg { width: 30px; height: 20px; }
-.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 99px; border: 1px solid var(--rule-2); font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 99px; border: 1px solid var(--rule-2); font-size: 12px; color: var(--ink-2); white-space: nowrap; max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.chip .dot { flex: none; }
 .chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
 .chip.real .dot { background: var(--good); }
 .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-left: auto; }
