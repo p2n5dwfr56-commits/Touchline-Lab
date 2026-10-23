@@ -234,6 +234,8 @@ svg { display: block; }
 .prose h3 { font-family: var(--font-display); text-transform: uppercase; letter-spacing: 0.04em; font-size: 17px; margin: 18px 0 6px; }
 .prose code { font-family: var(--font-mono); font-size: 12.5px; background: var(--surface-2); padding: 1px 4px; border-radius: 3px; }
 .prose a { color: var(--c1); text-underline-offset: 2px; overflow-wrap: anywhere; }
+.saved { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--rule); font-size: 13.5px; }
+.saved .sub { margin-top: 2px; }
 textarea { width: 100%; font-family: var(--font-mono); font-size: 12px; line-height: 1.4; background: var(--surface); color: var(--ink); border: 1px solid var(--rule-2); border-radius: 4px; padding: 8px; resize: vertical; white-space: pre; }
 .status { margin-top: 10px; font-size: 13.5px; }
 .status.err { color: var(--bad-text); }

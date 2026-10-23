@@ -1012,12 +1012,15 @@ function flash(msg, cls) {
   setTimeout(() => { const n = document.querySelector('#main'); if (n) n.prepend(h('p', { class: 'status ' + (cls || 'ok'), role: 'status', style: { marginTop: 0, marginBottom: '12px' }, text: msg })); }, 0);
 }
 // Add FBref season totals (one or more tables) to a team in the loaded season.
-function addFbref(texts, teamId, statusEl) {
+// opts.restore: replaying saved data at start-up (no render, message or re-save); opts.nosave: the caller saves.
+function addFbref(texts, teamId, statusEl, opts = {}) {
   const say = (msg) => { if (statusEl) { statusEl.className = 'status err'; statusEl.textContent = msg; } };
   if (DB.source === 'demo') { say('Load a real season first (for example this season’s football-data.co.uk file), then add FBref player stats to it.'); return false; }
   const r = attachFbref(DB, teamId, texts);
   if (!r.tables) { say(r.errors[0] || 'No FBref player table found.'); return false; }
   cache.clear();
+  if (opts.restore) return true;
+  if (!opts.nosave) saveFbref(teamId, teamName(teamId), texts);
   const n = Object.values(DB.players).filter((p) => p.team === teamId && DB.seasonPS[p.id]).length;
   const parts = [];
   if (r.fields.length) parts.push(`${r.fields.map((f) => FB_FIELD_NAMES[f] || f).join(', ')} for ${r.rowsRead} ${teamName(teamId)} player${r.rowsRead === 1 ? '' : 's'} (${n} in the squad view)`);
@@ -1050,6 +1053,68 @@ function fbrefCard() {
     st,
     h('p', { class: 'note', text: 'FBref figures are season totals, so the match filters do not change them. Data: FBref.com.' }));
 }
+// Import file texts ({name, text}): a new season (CSV/JSON), or FBref tables added to the loaded one.
+// opts.restore replays saved data quietly at start-up. Returns true when something was loaded.
+function importTexts(texts, statusEl, opts = {}) {
+  const fail = (msg) => { if (statusEl) { statusEl.className = 'status err'; statusEl.textContent = msg; } return false; };
+  // CSV files (football-data.co.uk) and JSON files (API-Football, StatsBomb) are told apart by content.
+  const csv = [], parsed = [], fb = [];
+  texts.forEach((f) => {
+    const t = f.text.replace(/^﻿/, '').trimStart();
+    if (t[0] === '[' || t[0] === '{') parsed.push({ name: f.name, data: JSON.parse(t) });
+    else if (fdIsCSV(fdParseCSV(t))) csv.push({ name: f.name, rows: fdParseCSV(t) });
+    else if (fbIsTable(fbParse(t)) || fbIsFixtures(fbParse(t))) fb.push({ name: f.name, text: t });
+  });
+  if (!csv.length && !parsed.length && !fb.length) return fail('These files are not in a format Touchline Lab reads. Use a football-data.co.uk CSV, an FBref player table, the API-Football download, or StatsBomb event files.');
+  if (!csv.length && !parsed.length) return addFbref(fb, S.team, statusEl, opts); // FBref tables add to the season already loaded
+  const kind = csv.length ? 'fd' : isApiFootball(parsed) ? 'af' : 'sb';
+  const { db, errors } = kind === 'fd' ? importFootballData(csv) : kind === 'af' ? importApiFootball(parsed) : importStatsBomb(parsed);
+  if (!db.matches.length) {
+    return fail(kind !== 'sb' ? (errors[0] || 'No finished matches found.') : 'No matches found. Use a football-data.co.uk CSV, the API-Football file from the download script, or StatsBomb event files (each must include the two "Starting XI" events).');
+  }
+  DB = prepareDB(db);
+  cache.clear();
+  const counts = {};
+  DB.matches.forEach((m) => [m.home, m.away].forEach((t) => (counts[t] = (counts[t] || 0) + 1)));
+  const abd = DB.teams.find((t) => /aberdeen/i.test(t.name));
+  S.team = abd ? abd.id : Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+  S.form = null; S.shape = 'plan';
+  S.cmp = (DB.teams.find((t) => t.id !== S.team) || DB.teams[0]).id;
+  S.range = 'season'; S.player = null; S.match = null; S.pA = null; S.pB = null;
+  if (fb.length) addFbref(fb, S.team, statusEl, { ...opts, nosave: true, restore: true });
+  if (opts.restore) return true;
+  savePrimary(texts, DB.label).then((ok) => { if (S.tab === 'data') render(); if (!ok) flash('Loaded, but this browser would not save it, so it will be gone when you reload the page.', 'err'); });
+  if (errors.length && kind === 'fd') flash(errors[0], 'err');
+  S.tab = fb.length ? 'players' : 'overview';
+  render();
+  return true;
+}
+function savedPanel() {
+  const m = STORE.meta;
+  const wrap = h('div', { class: 'saved', role: 'status' });
+  if (STORE.ok === false) {
+    wrap.append(h('p', { class: 'note', style: { margin: 0 }, text: 'This browser is not letting the page save data (for example in a private window), so imports last until you reload.' }));
+    return wrap;
+  }
+  if (!m) {
+    wrap.append(h('p', { class: 'note', style: { margin: 0 }, text: 'Imports are saved in this browser and restored the next time you open Touchline Lab. Nothing is uploaded.' }));
+    return wrap;
+  }
+  const when = new Date(m.savedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  const what = [m.label || m.files.join(', ')];
+  if (m.fbTables) what.push(`${m.fbTables} FBref table${m.fbTables > 1 ? 's' : ''} (${m.fbTeams.join(', ')})`);
+  let armed = false;
+  const btn = h('button', { class: 'btn ghost', type: 'button', text: 'Forget saved data' });
+  btn.addEventListener('click', async () => {
+    if (!armed) { armed = true; btn.textContent = 'Click again to forget it'; return; }
+    await forgetSaved();
+    DB = DEMO; cache.clear(); S.team = 'ABE'; S.cmp = 'CEL'; S.range = 'season'; S.player = null; S.match = null; S.pA = S.pB = null; S.form = null;
+    render();
+    flash('Saved data forgotten. Showing the demo season.');
+  });
+  wrap.append(h('div', null, h('b', { text: 'Saved in this browser' }), h('div', { class: 'sub', text: what.join(' + ') + ' · last saved ' + when })), btn);
+  return wrap;
+}
 function viewData(el) {
   const status = h('div', { class: 'status', role: 'status' });
   const input = h('input', { type: 'file', id: 'file', accept: '.json,.csv,application/json,text/csv', multiple: true, hidden: true, onchange: (e) => load(e.target.files) });
@@ -1066,36 +1131,7 @@ function viewData(el) {
     status.textContent = 'Reading ' + files.length + ' file' + (files.length > 1 ? 's' : '') + '…';
     try {
       const texts = await Promise.all(files.map(async (f) => ({ name: f.name, text: await f.text() })));
-      // CSV files (football-data.co.uk) and JSON files (API-Football, StatsBomb) are told apart by content.
-      const csv = [], parsed = [], fb = [];
-      texts.forEach((f) => {
-        const t = f.text.replace(/^﻿/, '').trimStart();
-        if (t[0] === '[' || t[0] === '{') parsed.push({ name: f.name, data: JSON.parse(t) });
-        else if (fdIsCSV(fdParseCSV(t))) csv.push({ name: f.name, rows: fdParseCSV(t) });
-        else if (fbIsTable(fbParse(t)) || fbIsFixtures(fbParse(t))) fb.push({ name: f.name, text: t });
-      });
-      if (!csv.length && !parsed.length && !fb.length) { status.className = 'status err'; status.textContent = 'These files are not in a format Touchline Lab reads. Use a football-data.co.uk CSV, an FBref player table, the API-Football download, or StatsBomb event files.'; return; }
-      if (!csv.length && !parsed.length) { addFbref(fb, S.team, status); return; } // FBref tables add to the season already loaded
-      const kind = csv.length ? 'fd' : isApiFootball(parsed) ? 'af' : 'sb';
-      const { db, errors } = kind === 'fd' ? importFootballData(csv) : kind === 'af' ? importApiFootball(parsed) : importStatsBomb(parsed);
-      if (!db.matches.length) {
-        status.className = 'status err';
-        status.textContent = kind !== 'sb' ? (errors[0] || 'No finished matches found.') : 'No matches found. Use a football-data.co.uk CSV, the API-Football file from the download script, or StatsBomb event files (each must include the two "Starting XI" events).';
-        return;
-      }
-      if (errors.length && kind === 'fd') setTimeout(() => { const n = document.querySelector('#main'); if (n) n.prepend(h('p', { class: 'note', role: 'status', text: errors[0] })); }, 0);
-      DB = prepareDB(db);
-      cache.clear();
-      const counts = {};
-      DB.matches.forEach((m) => [m.home, m.away].forEach((t) => (counts[t] = (counts[t] || 0) + 1)));
-      const abd = DB.teams.find((t) => /aberdeen/i.test(t.name));
-      S.team = abd ? abd.id : Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
-      S.form = null; S.shape = 'plan';
-      S.cmp = (DB.teams.find((t) => t.id !== S.team) || DB.teams[0]).id;
-      S.range = 'season'; S.player = null; S.match = null; S.pA = null; S.pB = null;
-      S.tab = 'overview';
-      if (fb.length) { addFbref(fb, S.team, status); return; }
-      render();
+      importTexts(texts, status);
     } catch (err) {
       status.className = 'status err';
       status.textContent = 'Could not read the files: ' + err.message + '. Check they are a football-data.co.uk CSV, or API-Football or StatsBomb JSON files.';
@@ -1123,8 +1159,7 @@ function viewData(el) {
         h('li', null, 'Drop the downloaded ', h('code', { text: 'SC0.csv' }), ' into the import box.')),
       h('p', null, 'You get the league table, form, results, xG, shots, shots on target, corners, fouls and cards per match, plus pre-match odds. The app turns the odds into expected points, so you can see which teams are doing better or worse than the market expected.'),
       h('p', null, 'There are no player stats or line-ups in this file, and older seasons have no xG. The site keeps it updated through the season, so download it again for the latest results.'))),
-    card('Import data', 'football-data.co.uk, API-Football or StatsBomb files · they stay in your browser, nothing is uploaded', drop, status,
-      DB.source !== 'demo' ? h('div', { style: { marginTop: '12px' } }, h('button', { class: 'btn ghost', type: 'button', onclick: () => { DB = DEMO; cache.clear(); S.team = 'ABE'; S.cmp = 'CEL'; S.range = 'season'; S.player = null; S.match = null; S.pA = S.pB = null; render(); }, text: 'Back to demo season' })) : null,
+    card('Import data', 'football-data.co.uk, API-Football or StatsBomb files · they stay in your browser, nothing is uploaded', drop, status, savedPanel(),
       h('p', { class: 'note', text: 'StatsBomb tip: in the open-data repository, events live in data/events/ and fixtures in data/matches/<competition_id>/<season_id>.json. Load several matches from one competition to unlock league tables and rankings.' })),
     card('Real Aberdeen data from API-Football', 'Free plan: seasons 2022/23 to 2024/25, about 95 matches a day', h('div', { class: 'prose' },
       h('ol', null,
@@ -1140,11 +1175,16 @@ function boot() {
   buildShell();
   const loading = h('p', { class: 'empty', text: 'Generating demo season…' });
   mainEl.append(loading);
-  setTimeout(() => {
+  setTimeout(async () => {
     DEMO = DB = prepareDB(buildDemo());
     const hash = (location.hash || '').slice(1);
     if (TABS.some(([k]) => k === hash)) S.tab = hash;
+    // Bring back the last imported season (and FBref tables) saved in this browser
+    loading.textContent = 'Loading your saved data…';
+    const restored = await restoreSaved();
     render();
+    if (restored && restored.error) flash(restored.error, 'err');
+    else if (restored && STORE.meta) flash(`Restored your saved data: ${STORE.meta.label || STORE.meta.files.join(', ')}${STORE.meta.fbTables ? ` + ${STORE.meta.fbTables} FBref table${STORE.meta.fbTables > 1 ? 's' : ''}` : ''}. Manage it in the Data tab.`);
   }, 20);
   let rt, lastW = window.innerWidth;
   window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { if (DB && Math.abs(window.innerWidth - lastW) > 40) { lastW = window.innerWidth; const y = window.scrollY; render(); window.scrollTo(0, y); } }, 250); });

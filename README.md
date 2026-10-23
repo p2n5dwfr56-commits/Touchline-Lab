@@ -7,6 +7,10 @@ game states (possession phases), formations and tactical line-ups, and side-by-s
 Open `dist/index.html` in a browser. No server or install needed.
 After editing anything in `src/`, run `./build.sh` to rebuild `dist/index.html`.
 
+Imported files and pasted FBref tables are saved in the browser (IndexedDB, nothing uploaded) and
+restored when the app is opened again; "Forget saved data" in the Data tab clears them. Saved data
+belongs to that browser on that device.
+
 ## Layout
 - `src/engine.js` – data model, demo-season simulator, StatsBomb importer, all metrics
 - `src/ui.js` – views and charts (plain JS + SVG, no libraries)
@@ -14,6 +18,7 @@ After editing anything in `src/`, run `./build.sh` to rebuild `dist/index.html`.
 - `src/apifootball.js` – API-Football importer (match/player stats, line-ups, formations)
 - `src/footballdata.js` – football-data.co.uk CSV importer (results, team match stats, odds)
 - `src/fbref.js` – FBref player table importer (season totals per player)
+- `src/store.js` – saves imports in the browser and restores them on open
 - `tools/fetch-api-football.mjs` – downloads a season from API-Football into one file
 - `src/style.css`, `src/head.html` – styling and page head
 
