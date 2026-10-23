@@ -194,6 +194,6 @@ async function saveAttendanceFile(f) {
   return storeSet('attendance', list);
 }
 async function restoreAttendance() {
-  if (SNAP && SNAP.attendance) addAttendanceFile(SNAP.attendance);
+  if (SNAP && SNAP.attendance) [].concat(SNAP.attendance).forEach(addAttendanceFile);
   ((await storeGet('attendance')) || []).forEach((f) => { try { addAttendanceFile(JSON.parse(f.text)); } catch (e) { /* skip a damaged file */ } });
 }

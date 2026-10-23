@@ -5227,7 +5227,7 @@ function attendanceCard(grid, key) {
   const val = (tk, k) => (ATT[k][tk] && ATT[k][tk].att >= 500 ? ATT[k][tk].att : NaN); // 2020/21 was behind closed doors
   const series = others.map((tk) => ({ name: clubs[tk], color: G, width: 1.2, noDots: true, values: seasons.map((k) => val(tk, k)) }))
     .concat(clubs[key] ? [{ name: clubs[key], color: A, width: 3, values: seasons.map((k) => val(key, k)) }] : []);
-  const c = card({ title: 'Home attendances', span: true }, `Average league home crowd by season · ${clubs[key] || teamName(S.team)} highlighted${others.length ? ', other clubs in grey' : ''} · from FBref and Wikipedia`);
+  const c = card({ title: 'Home attendances', span: true }, `Average league home crowd by season · ${clubs[key] || teamName(S.team)} highlighted${others.length ? ', other clubs in grey' : ''} · from your attendance CSV, FBref and football-data.co.uk`);
   const box = h('div');
   c.append(box);
   grid.append(c);
@@ -5244,7 +5244,7 @@ function attendanceCard(grid, key) {
       h('tbody', null, rows.map(([tk, x], i) => h('tr', { class: tk === key ? 'focus' : '', style: { cursor: 'default' } }, h('td', { text: i + 1 }), h('td', { class: 'l', text: x.name }), h('td', { text: x.att >= 500 ? x.att.toLocaleString('en-GB') : 'closed doors' })))))));
   }
   const missing = seasons.length < 10 || others.length < 5;
-  c.append(h('p', { class: 'note', text: (missing ? 'To add every club, paste each season’s attendance table into the Data tab’s FBref box: either FBref’s League Table (the season page, e.g. fbref.com/en/comps/40/2023-2024/2023-2024-Scottish-Premiership-Stats, “Regular season” → Share & Export → Get table as CSV), or the Attendances table from the Wikipedia article for that season (e.g. “2010–11 Scottish Premier League”), selected and copied from the page. Wikipedia goes back further. ' : '') + 'FBref has attendances from about 2014/15; Wikipedia’s season articles go back further. 2020/21 was played behind closed doors.' }));
+  c.append(h('p', { class: 'note', text: (missing ? 'To add every club, paste each season’s attendance table into the Data tab’s FBref box: either FBref’s League Table (the season page, e.g. fbref.com/en/comps/40/2023-2024/2023-2024-Scottish-Premiership-Stats, “Regular season” → Share & Export → Get table as CSV), or the Attendances table from the Wikipedia article for that season (e.g. “2010–11 Scottish Premier League”), selected and copied from the page. Wikipedia goes back further. ' : '') + 'Figures from 1976/77 come from the attendance CSV you supplied (compiled from Wikipedia, European Football Statistics, London Hearts, CelticWiki and others); FBref and football-data.co.uk fill gaps. Before 1995/96 only a few clubs have figures. 2020/21 was played behind closed doors.' }));
 }
 
 // Final league position by season, 1st at the top
@@ -6030,7 +6030,7 @@ async function saveAttendanceFile(f) {
   return storeSet('attendance', list);
 }
 async function restoreAttendance() {
-  if (SNAP && SNAP.attendance) addAttendanceFile(SNAP.attendance);
+  if (SNAP && SNAP.attendance) [].concat(SNAP.attendance).forEach(addAttendanceFile);
   ((await storeGet('attendance')) || []).forEach((f) => { try { addAttendanceFile(JSON.parse(f.text)); } catch (e) { /* skip a damaged file */ } });
 }
 </script>
