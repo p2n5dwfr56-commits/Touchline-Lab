@@ -606,6 +606,81 @@ function phaseBlock(a, compact) {
   return wrap;
 }
 
+/* ---------- Team analysis without event locations ---------- */
+function pitchMapsNote() {
+  const body = [h('p', { class: 'note', style: { marginTop: 0 }, text: `Heatmaps, shot maps, passing networks and possession phases need the pitch position of every pass, shot and tackle. ${DB.label} has ${dataHas()}, but no positions: for the Scottish Premiership that data is sold by Hudl StatsBomb, Opta and Wyscout and isn’t available free.` })];
+  if (typeof SAMPLE !== 'undefined' && SAMPLE) body.push(h('div', { class: 'saved', style: { marginTop: '10px' } }, h('div', null, h('b', { text: 'See them on real matches' }), h('div', { class: 'sub', text: SAMPLE.label + ' from StatsBomb’s free data has every event with its position.' })),
+    h('button', { class: 'btn', type: 'button', text: 'Open the sample', onclick: () => { loadSample(); S.tab = 'team'; render(); window.scrollTo({ top: 0 }); } })));
+  return card({ title: 'Pitch maps', span: true }, null, ...body);
+}
+function teamBasics(grid, T, ms) {
+  const A = css('--team-a'), B = css('--ink-2');
+  const pts = (m) => (result(m, T) === 'W' ? 3 : result(m, T) === 'D' ? 1 : 0);
+  // Home and away
+  const rows = [['All', ms], ['Home', ms.filter((m) => m.home === T && !m.neutral)], ['Away', ms.filter((m) => m.away === T && !m.neutral)]].filter(([, x]) => x.length);
+  const col = (lab, f, d) => [lab, rows.map(([, x]) => { const a = aggTeam(x, T); return f(a, x); }), d];
+  const lines = [
+    col('Played', (a) => a.n, 0), col('Won · drawn · lost', (a) => `${a.w} · ${a.d} · ${a.l}`), col('Points per game', (a) => safe(a.pts, a.n), 2),
+    col('Goals for · against per game', (a) => `${fmt(safe(a.g, a.n), 2)} · ${fmt(safe(a.ga, a.n), 2)}`),
+    col('xG for · against per game', (a) => (has(a.xg) ? `${fmt(safe(a.xg, a.n), 2)} · ${fmt(safe(a.xga, a.n), 2)}` : null)),
+    col('Shots for · against per game', (a) => (has(a.sh) ? `${fmt(safe(a.sh, a.n), 1)} · ${fmt(safe(a.sha, a.n), 1)}` : null)),
+    col('Possession', (a) => (has(a.posT) && has(a.oposT) ? fmt((100 * a.posT) / (a.posT + a.oposT), 0) + '%' : null)),
+    col('Pass completion', (a) => (has(a.pc) && a.pa ? fmt((100 * a.pc) / a.pa, 0) + '%' : null)),
+    col('Clean sheets', (a, x) => x.filter((m) => goalsAg(m, T) === 0).length, 0),
+  ].filter(([, v]) => v.some((x) => x != null && x !== ''));
+  grid.append(card('Home and away', rangeLabel() + ' · ' + teamName(T), h('div', { class: 'tbl-wrap' }, h('table', null,
+    h('thead', null, h('tr', null, h('th', { class: 'l', text: '' }), rows.map(([l]) => h('th', { text: l })))),
+    h('tbody', null, lines.map(([l, v, d]) => h('tr', { style: { cursor: 'default' } }, h('td', { class: 'l', text: l }), v.map((x) => h('td', { text: typeof x === 'number' ? fmt(x, d == null ? 2 : d) : x == null ? '–' : x })))))))));
+
+  // When goals happen, and scoring first (needs goal minutes: Sportmonks or API-Football)
+  const withT = ms.filter((m) => (m.timeline || []).some((e) => e.kind === 'goal') || (goalsFor(m, T) === 0 && goalsAg(m, T) === 0 && m.timeline && m.timeline.length));
+  if (withT.length >= 3) {
+    const bins = [[1, 15], [16, 30], [31, 45], [46, 60], [61, 75], [76, 90]].map(([a, b]) => ({ l: a + '–' + b + "'", f: 0, a: 0, lo: a, hi: b }));
+    let first = { f: [], a: [], none: [] };
+    withT.forEach((m) => {
+      const goals = m.timeline.filter((e) => e.kind === 'goal').sort((x, y) => x.min - y.min);
+      goals.forEach((e) => { const k = bins.findIndex((b) => e.min <= b.hi); const b = bins[k < 0 ? 5 : k]; if (e.team === T) b.f++; else b.a++; });
+      (goals.length ? (goals[0].team === T ? first.f : first.a) : first.none).push(m);
+    });
+    const max = Math.max(1, ...bins.map((b) => Math.max(b.f, b.a)));
+    grid.append(card('When goals happen', `${teamName(T)} goals scored and conceded by 15-minute period (stoppage time counts in the period it follows) · ${withT.length} matches`,
+      h('div', { class: 'ask-bars' }, bins.map((b) => h('div', { class: 'ask-bar' }, h('span', { class: 'ask-bar-l', text: b.l }),
+        h('span', { class: 'ask-bar-t' }, h('i', { style: { width: (100 * b.f) / max + '%', background: A } }), h('i', { style: { width: (100 * b.a) / max + '%', background: B } })),
+        h('span', { class: 'ask-bar-v', text: b.f + ' · ' + b.a })))),
+      legend([['Scored', A], ['Conceded', B]])));
+    const rec = (list) => { const n = list.length, p = list.reduce((s, m) => s + pts(m), 0); const w = list.filter((m) => result(m, T) === 'W').length, d = list.filter((m) => result(m, T) === 'D').length; return { n, w, d, l: n - w - d, ppg: n ? p / n : NaN }; };
+    const R = [['Scored first', rec(first.f)], ['Conceded first', rec(first.a)], ['Goalless', rec(first.none)]].filter(([, r]) => r.n);
+    grid.append(card('Scoring first', 'What happens once the first goal goes in', h('div', { class: 'tbl-wrap' }, h('table', null,
+      h('thead', null, h('tr', null, ['', 'Matches', 'W', 'D', 'L', 'Pts / game'].map((c, i) => h('th', { class: i === 0 ? 'l' : '', text: c })))),
+      h('tbody', null, R.map(([l, r]) => h('tr', { style: { cursor: 'default' } }, h('td', { class: 'l', text: l }), h('td', { text: r.n }), h('td', { text: r.w }), h('td', { text: r.d }), h('td', { text: r.l }), h('td', null, h('b', { text: fmt(r.ppg, 2) })))))))));
+  }
+
+  // Match by match
+  const useXg = ms.length && ms.every((m) => has(m.ts[T].xg) && has(m.ts[T].xga));
+  const hasPoss = ms.some((m) => has(m.ts[T].posT) && has(m.ts[T].oposT));
+  if (ms.length >= 2 && (useXg || ms.some((m) => has(m.ts[T].sh)))) {
+    const [kF, kA, unit] = useXg ? ['xg', 'xga', 'xG'] : ['sh', 'sha', 'Shots'];
+    const c = card(unit + ' and possession by match', `${unit} for and against${hasPoss ? ', and possession %' : ''}, match by match`);
+    const b1 = h('div');
+    c.append(b1);
+    grid.append(c);
+    const v = (m, k) => (has(m.ts[T][k]) ? m.ts[T][k] : NaN);
+    lineChart(b1, {
+      labels: ms.map((m) => roundLabel(m)),
+      series: [{ name: unit + ' for', color: A, values: ms.map((m) => v(m, kF)) }, { name: unit + ' against', color: B, dash: '5 4', values: ms.map((m) => v(m, kA)) }],
+      yFmt: (x) => x.toFixed(x % 1 ? 1 : 0),
+      tipFor: (i) => { const m = ms[i], s = m.ts[T]; return [{ v: matchLabel(m, T) }, { v: `${result(m, T)} ${goalsFor(m, T)}–${goalsAg(m, T)}`, strong: true }, { color: A, v: fmt(s[kF], useXg ? 2 : 0), l: unit + ' for' }, { color: B, v: fmt(s[kA], useXg ? 2 : 0), l: unit + ' against' }, has(s.posT) && has(s.oposT) ? { v: fmt((100 * s.posT) / (s.posT + s.oposT), 0) + '% possession' } : null].filter(Boolean); },
+    });
+    c.append(legend([[unit + ' for', A, 'line'], [unit + ' against', B, 'line line-dash']]));
+    if (hasPoss) {
+      const b2 = h('div', { style: { marginTop: '10px' } });
+      c.append(b2);
+      lineChart(b2, { labels: ms.map((m) => roundLabel(m)), height: 150, zero: false, series: [{ name: 'Possession %', color: css('--c1'), values: ms.map((m) => { const s = m.ts[T]; return has(s.posT) && has(s.oposT) ? (100 * s.posT) / (s.posT + s.oposT) : NaN; }) }], yFmt: (x) => x.toFixed(0) + '%', tipFor: (i) => [{ v: matchLabel(ms[i], T) }, { v: fmt((100 * ms[i].ts[T].posT) / (ms[i].ts[T].posT + ms[i].ts[T].oposT), 0) + '% possession', strong: true }] });
+      c.append(legend([['Possession %', css('--c1'), 'line']]));
+    }
+  }
+}
+
 /* ---------- Team analysis ---------- */
 function viewTeam(el) {
   const T = S.team, ms = scoped(T), a = teamAgg(T), A = css('--team-a');
@@ -613,8 +688,9 @@ function viewTeam(el) {
   const grid = h('div', { class: 'grid' });
   el.append(grid);
   if (!DB.hasEvents) {
-    grid.append(eventsNote('Pitch maps', 'Touch maps, shot maps, game states, possession outcomes, passing networks and territory'));
+    teamBasics(grid, T, ms);
     grid.append(card({ title: 'Team profile', span: true }, `${rangeLabel()} vs the other ${leagueAggs().length - 1} teams over the same span · bar = league rank, longer is better`, profileTable(T)));
+    grid.append(pitchMapsNote());
     return;
   }
 
