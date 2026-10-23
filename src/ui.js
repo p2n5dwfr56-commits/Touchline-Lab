@@ -8,7 +8,7 @@ const S = {
   tab: 'overview', team: 'ABE', venue: 'all', range: 'season', cmp: 'CEL',
   heat: 'all', shots: 'for', group: 'all', per90: true, sort: 'min', player: null,
   cmpMode: 'teams', pA: null, pB: null, match: null, act: 'pass', form: null, shape: 'plan',
-  opp: null, oppSort: 'next', oppScope: 'league', comp: 'all', loss: null, lossShow: 'shot', bwSort: 'wins', impMetric: 'rating', impPlayer: null, raceN: '5', kpPeriod: '1',
+  opp: null, oppSort: 'next', oppScope: 'league', comp: 'league', loss: null, lossShow: 'shot', bwSort: 'wins', impMetric: 'rating', impPlayer: null, raceN: '5', kpPeriod: '1',
 };
 const TABS = [['overview', 'Overview'], ['team', 'Team analysis'], ['press', 'Without the ball'], ['tactics', 'Tactics'], ['players', 'Players'], ['key', 'Key players'], ['compare', 'Compare'], ['opponents', 'Opponents'], ['seasons', 'Seasons'], ['matches', 'Matches'], ['data', 'Data']];
 
@@ -1120,9 +1120,9 @@ function addAfCup(parsed, texts, statusEl, opts = {}) {
   const files = texts.filter((t) => parsed.some((p) => p.name === t.name)).map((f) => ({ name: f.name, text: f.text }));
   if (DB.pastSeason) { const k = DB.season; Promise.all(files.map((f) => pastAddLayer(k, f))).then(refreshSeasons); }
   else saveLayers(files);
-  S.comp = 'all'; S.tab = 'matches'; S.match = null;
+  S.comp = 'league'; S.tab = 'overview'; S.match = null; // cup ties show in the Cup run card; stats stay league until Competition is changed
   render();
-  flash(`Added ${r.comp} ${sk}: ${r.matches} match${r.matches === 1 ? '' : 'es'}${r.detailed ? ` (${r.detailed} with line-ups, team and player stats)` : ''}${r.upcoming ? `, plus ${r.upcoming} upcoming` : ''}. Use Competition at the top to see cups with or without the league.`);
+  flash(`Added ${r.comp} ${sk}: ${r.matches} match${r.matches === 1 ? '' : 'es'}${r.detailed ? ` (${r.detailed} with line-ups, team and player stats)` : ''}${r.upcoming ? `, plus ${r.upcoming} upcoming` : ''}. Stats stay league only: set Competition at the top to All competitions or Cups only to include them.`);
   return true;
 }
 // Attach Sportmonks downloads (line-ups, events, per-player match stats) to the loaded season
@@ -1197,7 +1197,7 @@ function importTexts(texts, statusEl, opts = {}) {
     DB = eventsDB(evb[0]); DB.source = 'import'; DB.transient = true;
     cache.clear();
     S.team = DB.teams[0].id; S.cmp = (DB.teams[1] || DB.teams[0]).id;
-    S.range = 'season'; S.player = null; S.match = null; S.pA = S.pB = null; S.form = null; S.opp = null; S.loss = null; S.comp = 'all';
+    S.range = 'season'; S.player = null; S.match = null; S.pA = S.pB = null; S.form = null; S.opp = null; S.loss = null; S.comp = 'league';
     S.tab = 'press';
     render();
     flash(`Loaded ${evb[0].label}: ${DB.matches.length} matches with every event${evb[0].with360 ? ` (${evb[0].with360} with 360 player positions)` : ''}. Event files are not saved in the browser, so your saved data comes back when you reload. Data: ${evb[0].attribution}.`);

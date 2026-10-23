@@ -329,6 +329,6 @@ function loadSample() {
   const sco = DB.teams.find((t) => /scotland/i.test(t.name));
   S.team = sco ? sco.id : DB.teams[0].id;
   S.cmp = (DB.teams.find((t) => t.id !== S.team) || DB.teams[0]).id;
-  S.range = 'season'; S.player = null; S.match = null; S.pA = S.pB = null; S.form = null; S.opp = null; S.loss = null; S.comp = 'all';
+  S.range = 'season'; S.player = null; S.match = null; S.pA = S.pB = null; S.form = null; S.opp = null; S.loss = null; S.comp = 'league';
   return true;
 }

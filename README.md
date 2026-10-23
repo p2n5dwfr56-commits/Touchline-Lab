@@ -172,5 +172,5 @@ API_FOOTBALL_KEY=your_key node tools/fetch-api-football.mjs --league 185 --seaso
 
 Drop the file into the Data tab on top of the league season. Teams and players are matched by name to the
 league data (including API-Football's short names such as "K. Nisbet"), and the same ties from FBref or the
-Add a match form give way to the detailed version. With cup detail loaded, team and player stats, Key players
-and the match list follow the Competition filter; the league table stays league only.
+Add a match form give way to the detailed version. The Competition filter starts on League only; set it to All competitions or Cups only to include cup ties
+in team and player stats, Key players and the match list. The league table always stays league only.

@@ -62,7 +62,7 @@ function loadSeason(season) {
   cache.clear();
   const t = DB.teams.find((x) => fbTeamKey(x.name) === keepName) || DB.teams.find((x) => /aberdeen/i.test(x.name)) || DB.teams[0];
   S.team = t.id; S.cmp = (DB.teams.find((x) => x.id !== S.team) || DB.teams[0]).id;
-  S.range = 'season'; S.player = null; S.match = null; S.pA = S.pB = null; S.form = null; S.opp = null; S.loss = null; S.impPlayer = null; S.comp = 'all';
+  S.range = 'season'; S.player = null; S.match = null; S.pA = S.pB = null; S.form = null; S.opp = null; S.loss = null; S.impPlayer = null; S.comp = 'league';
   return true;
 }
 function seasonSelect() {
