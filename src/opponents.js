@@ -8,11 +8,14 @@
 function seasonVs(T) {
   // Results (including fixtures without detail) grouped by opponent
   const out = {};
-  (DB.results || DB.matches).filter((m) => m.home === T || m.away === T).forEach((m) => {
+  // League results and cup ties, following the Competition filter
+  const league = S.comp === 'cups' ? [] : (DB.results || DB.matches).filter((m) => m.home === T || m.away === T);
+  const cups = S.comp === 'league' ? [] : (DB.cups || []).filter((m) => m.home === T || m.away === T);
+  league.concat(cups).sort((a, b) => (a.date || '').localeCompare(b.date || '')).forEach((m) => {
     const O = oppOf(m, T), r = (out[O] = out[O] || { p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, xg: 0, xga: 0, xgN: 0, matches: [] });
-    const gf = goalsFor(m, T), ga = goalsAg(m, T);
+    const gf = goalsFor(m, T), ga = goalsAg(m, T), res = result(m, T);
     r.p++; r.gf += gf; r.ga += ga;
-    if (gf > ga) r.w++; else if (gf === ga) r.d++; else r.l++;
+    if (res === 'W') r.w++; else if (res === 'D') r.d++; else r.l++;
     const s = m.ts && m.ts[T];
     if (s && has(s.xg) && has(s.xga)) { r.xg += s.xg; r.xga += s.xga; r.xgN++; }
     r.matches.push(m);
@@ -43,6 +46,8 @@ function viewOpponents(el) {
   const rows = {};
   const keyOf = (id, name) => id || 'name:' + fbTeamKey(name);
   DB.teams.filter((t) => t.id !== T).forEach((t) => (rows[t.id] = { key: t.id, id: t.id, name: t.name }));
+  // Cup opponents from outside the league
+  Object.keys(season).forEach((id) => { if (!rows[id] && DB.teamById[id]) rows[id] = { key: id, id, name: teamName(id), nonLeague: true }; });
   recs.forEach((r) => {
     const k = keyOf(r.oppId, r.name);
     if (!rows[k]) { if (S.oppScope !== 'all') return; rows[k] = { key: k, id: null, name: r.name }; }
@@ -88,7 +93,7 @@ function viewOpponents(el) {
         hasXg ? h('td', { text: s && s.xgN ? signed(s.xg - s.xga) : '–' }) : null,
         h('td', { class: 'sub', text: p ? ordinal(p.pos) : '' }),
         hasAll ? (a ? [h('td', { text: a.mp }), h('td', { text: fmt(a.w, 0) }), h('td', { text: fmt(a.d, 0) }), h('td', { text: fmt(a.l, 0) }), h('td', { text: has(a.w) ? ((100 * a.w) / a.mp).toFixed(0) + '%' : '–' }), h('td', { class: 'l' }, wdlBar(a.w || 0, a.d || 0, a.l || 0))] : [h('td', { text: '–' }), h('td'), h('td'), h('td'), h('td'), h('td')]) : null,
-        h('td', { class: 'l sub', text: r.next ? fmtDate(r.next.date) + ' · ' + (r.next.home ? 'H' : 'A') : '' }));
+        h('td', { class: 'l sub', text: r.next ? fmtDate(r.next.date) + ' · ' + (r.next.venue || (r.next.home ? 'H' : 'A')) + (r.next.round ? ' · ' + compShort(r.next.comp) + ' ' + roundShort(r.next.round) : '') : '' }));
     })));
   grid.append(card({ title: 'Head-to-head records', span: true, tools }, `${teamName(T)} against every ${S.oppScope === 'all' ? 'club played' : 'club in this league'} · click a row for the full matchup`,
     h('div', { class: 'tbl-wrap' }, t),
@@ -112,7 +117,7 @@ function matchupCard(T, r, pos) {
   const next = h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '6px' }, text: 'Next meeting' }));
   if (r.next) {
     next.append(h('div', { class: 'statline' },
-      h('div', null, h('b', { text: fmtDate(r.next.date) }), h('span', { text: (r.next.time ? r.next.time + ' · ' : '') + (r.next.home ? 'Home' : 'Away') })),
+      h('div', null, h('b', { text: fmtDate(r.next.date) }), h('span', { text: (r.next.time ? r.next.time + ' · ' : '') + (r.next.venue === 'N' ? 'Neutral venue' : r.next.home ? 'Home' : 'Away') })),
       h('div', null, h('b', { text: r.next.comp || '–' }), h('span', { text: 'Competition' }))));
   } else next.append(h('p', { class: 'sub', style: { marginTop: 0 }, text: DB.fixtures && DB.fixtures[T] ? 'No more meetings in the fixture list.' : 'Paste FBref’s Scores & Fixtures table in the Data tab to see upcoming meetings.' }));
   if (p) {
@@ -130,7 +135,7 @@ function matchupCard(T, r, pos) {
     ms.length ? h('div', { class: 'mlist' }, ms.map((m) => {
       const res = result(m, T), st = m.ts && m.ts[T];
       return h('button', { type: 'button', class: 'mrow', onclick: () => { S.tab = 'matches'; S.match = m.id; render(); window.scrollTo({ top: 0 }); }, title: 'Open the match report' },
-        h('span', { class: 'd', text: fmtDate(m.date) }), h('span', { class: 'res ' + res, text: res }), h('span', null, m.home === T ? 'Home' : 'Away'),
+        h('span', { class: 'd', text: fmtDate(m.date) + (m.cup ? ' · ' + roundLabel(m) : '') }), h('span', { class: 'res ' + res, text: res }), h('span', null, m.neutral ? 'Neutral' : m.home === T ? 'Home' : 'Away'),
         h('span', { class: 'score', text: goalsFor(m, T) + '–' + goalsAg(m, T) }), h('span', { class: 'xg', text: st && has(st.xg) ? st.xg.toFixed(1) + ' – ' + st.xga.toFixed(1) + ' xG' : '' }));
     })) : h('p', { class: 'sub', style: { marginTop: 0 }, text: r.id ? 'Not played yet this season.' : 'Not in this season’s league.' })));
 

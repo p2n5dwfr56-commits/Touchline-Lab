@@ -47,7 +47,13 @@ on target; Goalkeeping adds saves, save % and clean sheets; Playing Time adds te
 while on the pitch and points per match. (FBref dropped its xG and progression columns for 2026/27;
 they are read if present.) The team's **Scores & Fixtures** table adds each match's formations,
 possession, attendance and referee, matched to the loaded season by date and opponent, plus the
-upcoming fixtures. The **Records vs Opponents** table adds all-time head-to-head records, shown in
+upcoming fixtures. Rows from other competitions (League Cup, Scottish Cup, Europe) become cup
+matches: results, round, venue (including neutral), penalties, formations, possession and match
+info, with no team match stats. Cup ties FBref does not list can be entered in the Data tab's
+**Add a match** form (played, with a score, or upcoming, without one); they are saved with the
+other imports. A Competition filter (All / League / Cups) appears once a team has cup matches; it
+applies to results, form, matches, formations and opponents, while the league table, rankings and
+team stats stay league-only. The **Records vs Opponents** table adds all-time head-to-head records, shown in
 the Opponents tab. Columns are matched by name, so FBref layout changes are tolerated. Add several
 teams to get league-wide percentiles. FBref blocks automated downloads, so this is copy-and-paste by
 design.

@@ -257,7 +257,7 @@ function viewFormationsOnly(el, T, ms, A) {
 function viewTactics(el) {
   if (!DB.hasLineups) {
     // Formations without line-ups (e.g. from FBref's Scores & Fixtures table) still give a shape view
-    const fm = scoped(S.team).filter((m) => m.forms[S.team]);
+    const fm = compMatches(S.team).filter((m) => m.forms[S.team]); // includes cup ties, per the Competition filter
     if (!fm.length) return missingNote('Tactics', 'Line-ups and formations', el);
     return viewFormationsOnly(el, S.team, fm, css('--team-a'));
   }

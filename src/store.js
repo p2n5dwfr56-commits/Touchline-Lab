@@ -49,29 +49,62 @@ function savedSummary(log) {
   if (!log) return null;
   const fb = log.fbref || [];
   const teams = [...new Set(fb.map((f) => f.teamName))];
-  return { files: log.primary.map((f) => f.name), label: log.label || '', fbTables: fb.reduce((s, f) => s + f.texts.length, 0), fbTeams: teams, savedAt: log.savedAt };
+  return { files: log.primary.map((f) => f.name), label: log.label || '', fbTables: fb.reduce((s, f) => s + f.texts.length, 0), fbTeams: teams, manual: (log.manual || []).length, savedAt: log.savedAt };
 }
-// FBref tables saved on top of the same season (same label), so an updated season file keeps them
+// FBref tables and hand-entered matches saved on top of the same season (same label), so an updated season file keeps them
 async function carriedFbref(label) {
   const prev = await storeGet('log');
   return prev && prev.label === label ? prev.fbref || [] : [];
 }
-async function savePrimary(texts, label, fbref) {
-  const log = { v: 1, savedAt: Date.now(), label, primary: texts.map((t) => ({ name: t.name, text: t.text })), fbref: fbref || [] };
+async function carriedManual(label) {
+  const prev = await storeGet('log');
+  return prev && prev.label === label ? prev.manual || [] : [];
+}
+async function savePrimary(texts, label, fbref, manual) {
+  const log = { v: 1, savedAt: Date.now(), label, primary: texts.map((t) => ({ name: t.name, text: t.text })), fbref: fbref || [], manual: manual || [] };
   const ok = await storeSet('log', log);
   STORE.meta = ok ? savedSummary(log) : null;
   return ok;
 }
+// The saved log, or (on top of the built-in snapshot) a new one with the snapshot as its base
+async function baseLog() {
+  const log = await storeGet('log');
+  if (log) return log;
+  if (DB.snapshot && SNAP) return { v: 1, savedAt: Date.now(), label: DB.label, primary: SNAP.primary, fbref: snapshotFbref(DB), manual: [] };
+  return null;
+}
 async function saveFbref(teamId, teamNameText, texts) {
-  let log = await storeGet('log');
-  // On top of the built-in snapshot: save the snapshot as the base, so the new table survives a reload
-  if (!log && DB.snapshot && SNAP) log = { v: 1, savedAt: Date.now(), label: DB.label, primary: SNAP.primary, fbref: snapshotFbref(DB) };
+  const log = await baseLog();
   if (!log) return false; // FBref tables only make sense on top of a saved season
   texts.forEach((t) => {
     if (log.fbref.some((f) => f.team === teamId && f.texts.some((x) => x.text === t.text))) return; // same table pasted again
     log.fbref.push({ team: teamId, teamName: teamNameText, texts: [{ name: t.name, text: t.text }] });
   });
   log.savedAt = Date.now();
+  const ok = await storeSet('log', log);
+  STORE.meta = ok ? savedSummary(log) : STORE.meta;
+  return ok;
+}
+/* Matches entered by hand: a played cup tie (with a score) or an upcoming fixture (without one). */
+function applyManual(db, e) {
+  if (!db.teamById[e.team]) return false;
+  if (e.gf != null && e.ga != null) addCupMatch(db, e.team, { ...e, manual: true });
+  else addFixture(db, e.team, { ...e, manual: true });
+  return true;
+}
+async function saveManual(e) {
+  const log = await baseLog();
+  if (!log) return false;
+  log.manual = (log.manual || []).filter((x) => x.id !== e.id).concat(e);
+  log.savedAt = Date.now();
+  const ok = await storeSet('log', log);
+  STORE.meta = ok ? savedSummary(log) : STORE.meta;
+  return ok;
+}
+async function removeManual(id) {
+  const log = await storeGet('log');
+  if (!log) return false;
+  log.manual = (log.manual || []).filter((x) => x.id !== id);
   const ok = await storeSet('log', log);
   STORE.meta = ok ? savedSummary(log) : STORE.meta;
   return ok;
@@ -109,6 +142,8 @@ async function restoreSaved() {
     const ok = importTexts(log.primary, null, { restore: true });
     if (!ok) return { error: 'Your saved data could not be loaded again, so the demo season is showing. Import your files again in the Data tab.' };
     (log.fbref || []).forEach((f) => { if (DB.teamById[f.team]) addFbref(f.texts, f.team, null, { restore: true }); });
+    (log.manual || []).forEach((e) => applyManual(DB, e));
+    DB.manual = (log.manual || []).slice();
     STORE.meta = savedSummary(log);
     return { ok: true };
   } catch (e) {

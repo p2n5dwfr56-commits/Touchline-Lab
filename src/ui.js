@@ -8,7 +8,7 @@ const S = {
   tab: 'overview', team: 'ABE', venue: 'all', range: 'season', cmp: 'CEL',
   heat: 'all', shots: 'for', group: 'all', per90: true, sort: 'min', player: null,
   cmpMode: 'teams', pA: null, pB: null, match: null, act: 'pass', form: null, shape: 'plan',
-  opp: null, oppSort: 'next', oppScope: 'league',
+  opp: null, oppSort: 'next', oppScope: 'league', comp: 'all',
 };
 const TABS = [['overview', 'Overview'], ['team', 'Team analysis'], ['tactics', 'Tactics'], ['players', 'Players'], ['compare', 'Compare'], ['opponents', 'Opponents'], ['matches', 'Matches'], ['data', 'Data']];
 
@@ -111,8 +111,27 @@ const rangeLabel = () => {
 const oppOf = (m, T) => (m.home === T ? m.away : m.home);
 const goalsFor = (m, T) => (m.home === T ? m.hg : m.ag);
 const goalsAg = (m, T) => (m.home === T ? m.ag : m.hg);
-const result = (m, T) => (goalsFor(m, T) > goalsAg(m, T) ? 'W' : goalsFor(m, T) === goalsAg(m, T) ? 'D' : 'L');
-const matchLabel = (m, T) => `R${m.round} v ${teamName(oppOf(m, T))} (${m.home === T ? 'H' : 'A'})`;
+// A level cup tie settled on penalties counts as won or lost, as FBref records it
+const result = (m, T) => {
+  const f = goalsFor(m, T), a = goalsAg(m, T);
+  if (f === a && m.pens) { const pf = m.home === T ? m.pens.f : m.pens.a, pa = m.home === T ? m.pens.a : m.pens.f; return pf > pa ? 'W' : 'L'; }
+  return f > a ? 'W' : f === a ? 'D' : 'L';
+};
+const venueOf = (m, T) => (m.neutral ? 'N' : m.home === T ? 'H' : 'A');
+// "Semi-finals" -> "SF", "League Cup" -> "LC" for compact labels
+const roundShort = (r) => { const s = String(r || ''); return /semi/i.test(s) ? 'SF' : /quarter/i.test(s) ? 'QF' : /^final/i.test(s) ? 'Final' : /(round of|last) ?16/i.test(s) ? 'R16' : /group/i.test(s) ? 'Group' : s.replace(/^round\s*/i, 'R').slice(0, 8); };
+const compShort = (c) => String(c || 'Cup').split(/\s+/).map((w) => w[0]).join('').toUpperCase();
+const roundLabel = (m) => (m.cup ? `${compShort(m.comp)} ${roundShort(m.round)}`.trim() : 'R' + m.round);
+const matchLabel = (m, T) => `${roundLabel(m)} v ${teamName(oppOf(m, T))} (${venueOf(m, T)})`;
+const scoreText = (m, T) => goalsFor(m, T) + '–' + goalsAg(m, T) + (m.pens ? ` (${m.home === T ? m.pens.f : m.pens.a}–${m.home === T ? m.pens.a : m.pens.f} pens)` : '');
+// League matches plus cup matches, by the Competition filter. Stats views stay on teamMatches (league only).
+function compMatches(T, comp = S.comp, venue = S.venue) {
+  const inVenue = (m) => venue === 'all' || (!m.neutral && (venue === 'home' ? m.home === T : m.away === T));
+  const league = comp === 'cups' ? [] : teamMatches(T, venue);
+  const cups = comp === 'league' ? [] : (DB.cups || []).filter((m) => (m.home === T || m.away === T) && inVenue(m));
+  return league.concat(cups).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+}
+const hasCups = (T) => (DB.cups || []).some((m) => m.home === T || m.away === T);
 
 const cache = new Map();
 function memo(key, fn) { if (!cache.has(key)) cache.set(key, fn()); return cache.get(key); }
@@ -409,8 +428,13 @@ function renderChrome() {
     h('optgroup', { label: 'Single match' }, ms.slice().reverse().map((m) => h('option', { value: 'm:' + m.id, selected: S.range === 'm:' + m.id, text: matchLabel(m, S.team) + ' ' + goalsFor(m, S.team) + '–' + goalsAg(m, S.team) }))));
   const venueSel = h('select', { id: 'f-venue', onchange: (e) => { S.venue = e.target.value; if (S.range.startsWith('m:')) S.range = 'season'; render(); } },
     [['all', 'Home & away'], ['home', 'Home'], ['away', 'Away']].map(([v, l]) => h('option', { value: v, selected: S.venue === v, text: l })));
+  // Competition filter: only when this team has cup matches
+  const compSel = hasCups(S.team) ? h('div', { class: 'field' }, h('label', { for: 'f-comp', text: 'Competition' }),
+    h('select', { id: 'f-comp', title: 'Applies to results, form, matches, formations and opponents. Team stats and the league table are league only.', onchange: (e) => { S.comp = e.target.value; render(); } },
+      [['all', 'All competitions'], ['league', 'League only'], ['cups', 'Cups only']].map(([v, l]) => h('option', { value: v, selected: S.comp === v, text: l })))) : null;
   filtersEl.replaceChildren(
     h('div', { class: 'field' }, h('label', { for: 'f-team', text: 'Team' }), teamSel),
+    compSel,
     h('div', { class: 'field' }, h('label', { for: 'f-venue', text: 'Venue' }), venueSel),
     h('div', { class: 'field' }, h('label', { for: 'f-range', text: 'Matches' }), rangeSel));
   tabsEl.replaceChildren(...TABS.map(([k, l]) => h('button', { role: 'tab', 'aria-selected': String(S.tab === k), onclick: () => { S.tab = k; try { history.replaceState(null, '', '#' + k); } catch (e) {} render(); window.scrollTo({ top: 0 }); }, text: l })));
@@ -430,7 +454,9 @@ function viewOverview(el) {
   const table = leagueTable(DB, null);
   const row = table.find((r) => r.team.id === T);
   const all = teamMatches(T, 'all');
-  const form = (DB.results || DB.matches).filter((m) => m.home === T || m.away === T).slice(-5).map((m) => result(m, T));
+  const lgRes = S.comp === 'cups' ? [] : (DB.results || DB.matches).filter((m) => m.home === T || m.away === T);
+  const cupRes = S.comp === 'league' ? [] : (DB.cups || []).filter((m) => m.home === T || m.away === T);
+  const form = lgRes.concat(cupRes).sort((x, y) => (x.date || '').localeCompare(y.date || '')).slice(-5).map((m) => result(m, T));
   el.append(h('div', { class: 'hero' },
     h('h1', { text: teamName(T) }),
     h('div', { class: 'meta' },
@@ -509,16 +535,40 @@ function viewOverview(el) {
 
   // Upcoming fixtures (from FBref's Scores & Fixtures table)
   const today = new Date().toISOString().slice(0, 10);
-  const next = ((DB.fixtures && DB.fixtures[T]) || []).filter((f) => f.date >= today).slice(0, 6);
+  const allNext = ((DB.fixtures && DB.fixtures[T]) || []).filter((f) => f.date >= today);
+  const next = allNext.slice(0, 6);
   if (next.length) {
-    grid.append(card('Next fixtures', teamName(T) + ' · from FBref', h('div', { class: 'mlist' }, next.map((f) => {
-      const opp = f.oppId ? teamName(f.oppId) : f.opp;
-      const pts = f.oppId ? leagueTable(DB, null).find((r) => r.team.id === f.oppId) : null;
-      return h('div', { class: 'mrow', style: { cursor: 'default' } },
-        h('span', { class: 'd', text: fmtDate(f.date) + (f.time ? ' · ' + f.time : '') }), h('span', { class: 'res', style: { background: 'var(--surface-2)', color: 'var(--ink-2)' }, text: f.home ? 'H' : 'A' }),
-        h('span', null, (f.home ? 'v ' : '@ ') + opp), h('span', { class: 'sub', text: pts ? ordinal(pts.pos) + ' · ' + pts.a.pts + ' pts' : '' }), h('span', { class: 'xg', text: f.comp }));
-    }))));
+    grid.append(card('Next fixtures', teamName(T) + ' · from FBref and matches you added', h('div', { class: 'mlist' }, next.map((f) => fixtureRow(f, table)))));
   }
+  // Cup run: every cup tie this season, and the next one
+  const cups = (DB.cups || []).filter((m) => m.home === T || m.away === T);
+  const nextCup = allNext.find((f) => f.round || (f.comp && !/premiership|premier league/i.test(f.comp) && f.comp !== (DB.leagueComp || '')));
+  if (cups.length || nextCup) {
+    const byComp = {};
+    cups.forEach((m) => (byComp[m.comp] = byComp[m.comp] || []).push(m));
+    const body = h('div', { class: 'stack' });
+    if (nextCup) body.append(h('div', { class: 'cup-next' }, h('div', { class: 'eyebrow', text: 'Next' }),
+      h('div', { class: 'cup-next-line' }, h('b', { text: `${nextCup.comp}${nextCup.round ? ' ' + nextCup.round.toLowerCase() : ''}` }), ` v ${nextCup.oppId ? teamName(nextCup.oppId) : nextCup.opp}`),
+      h('div', { class: 'sub', text: `${fmtDate(nextCup.date)}${nextCup.time ? ' · ' + nextCup.time : ''} · ${nextCup.venue === 'N' ? 'neutral venue' : nextCup.home ? 'home' : 'away'}` })));
+    Object.entries(byComp).forEach(([comp, list]) => body.append(h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '4px' }, text: comp }),
+      h('div', { class: 'mlist' }, list.map((m) => {
+        const r = result(m, T);
+        return h('button', { type: 'button', class: 'mrow', onclick: () => { S.tab = 'matches'; S.match = m.id; S.comp = S.comp === 'league' ? 'all' : S.comp; render(); window.scrollTo({ top: 0 }); } },
+          h('span', { class: 'd', text: fmtDate(m.date) + ' · ' + roundShort(m.round) }), h('span', { class: 'res ' + r, text: r }),
+          h('span', null, (venueOf(m, T) === 'A' ? '@ ' : 'v ') + teamName(oppOf(m, T)) + (m.neutral ? ' (N)' : '')), h('span', { class: 'score', text: goalsFor(m, T) + '–' + goalsAg(m, T) }),
+          h('span', { class: 'xg', text: m.pens ? 'pens ' + (m.home === T ? m.pens.f + '–' + m.pens.a : m.pens.a + '–' + m.pens.f) : '' }));
+      })))));
+    grid.append(card('Cup run', teamName(T) + ' · cup ties this season', body));
+  }
+}
+function fixtureRow(f, table) {
+  const opp = f.oppId ? teamName(f.oppId) : f.opp;
+  const pts = f.oppId ? table.find((r) => r.team.id === f.oppId) : null;
+  const v = f.venue || (f.home ? 'H' : 'A');
+  return h('div', { class: 'mrow', style: { cursor: 'default' } },
+    h('span', { class: 'd', text: fmtDate(f.date) + (f.time ? ' · ' + f.time : '') }), h('span', { class: 'res', style: { background: 'var(--surface-2)', color: 'var(--ink-2)' }, title: v === 'N' ? 'Neutral venue' : v === 'H' ? 'Home' : 'Away', text: v }),
+    h('span', null, (v === 'A' ? '@ ' : 'v ') + opp), h('span', { class: 'sub', text: pts ? ordinal(pts.pos) + ' · ' + pts.a.pts + ' pts' : '' }),
+    h('span', { class: 'xg', text: f.round ? compShort(f.comp) + ' ' + roundShort(f.round) : f.comp }));
 }
 function phaseBlock(a, compact) {
   const L = leagueAggs();
@@ -875,7 +925,7 @@ function comparePlayers(el) {
 
 /* ---------- Matches ---------- */
 function viewMatches(el) {
-  const T = S.team, ms = teamMatches(T);
+  const T = S.team, ms = compMatches(T);
   if (!ms.length) { el.append(h('p', { class: 'empty', text: 'No matches for this filter.' })); return; }
   if (!S.match || !ms.find((m) => m.id === S.match)) S.match = (S.range.startsWith('m:') && ms.find((m) => m.id === S.range.slice(2)) ? S.range.slice(2) : ms[ms.length - 1].id);
   const grid = h('div', { class: 'grid', style: { gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))' } });
@@ -883,11 +933,11 @@ function viewMatches(el) {
   const list = h('div', { class: 'mlist' }, ms.slice().reverse().map((m) => {
     const r = result(m, T);
     return h('button', { type: 'button', class: 'mrow', 'aria-current': String(m.id === S.match), onclick: () => { S.match = m.id; render(); } },
-      h('span', { class: 'd', text: (m.date ? fmtDate(m.date) : '') + ' · R' + m.round }), h('span', { class: 'res ' + r, text: r }),
-      h('span', null, (m.home === T ? 'v ' : '@ ') + teamName(oppOf(m, T))), h('span', { class: 'score', text: goalsFor(m, T) + '–' + goalsAg(m, T) }),
-      h('span', { class: 'xg', text: has(m.ts[T].xg) ? m.ts[T].xg.toFixed(1) + ' – ' + m.ts[T].xga.toFixed(1) + ' xG' : has(m.ts[T].sh) ? m.ts[T].sh + ' – ' + m.ts[T].sha + ' shots' : '' }));
+      h('span', { class: 'd', text: (m.date ? fmtDate(m.date) : '') + ' · ' + roundLabel(m) }), h('span', { class: 'res ' + r, text: r }),
+      h('span', null, (venueOf(m, T) === 'A' ? '@ ' : 'v ') + teamName(oppOf(m, T)) + (m.neutral ? ' (N)' : '')), h('span', { class: 'score', text: goalsFor(m, T) + '–' + goalsAg(m, T) }),
+      h('span', { class: 'xg', text: m.pens ? 'pens ' + (m.home === T ? m.pens.f + '–' + m.pens.a : m.pens.a + '–' + m.pens.f) : has(m.ts[T].xg) ? m.ts[T].xg.toFixed(1) + ' – ' + m.ts[T].xga.toFixed(1) + ' xG' : has(m.ts[T].sh) ? m.ts[T].sh + ' – ' + m.ts[T].sha + ' shots' : m.cup ? m.comp : '' }));
   }));
-  const report = matchReport(DB.matches.find((m) => m.id === S.match), T);
+  const report = matchReport(ms.find((m) => m.id === S.match), T);
   grid.append(report, card('Results', teamName(T) + ' · newest first', list));
 }
 function matchReport(m, T) {
@@ -895,11 +945,11 @@ function matchReport(m, T) {
   const home = m.home, away = m.away;
   const wrap = h('section', { class: 'card span' });
   const info = m.info || {};
-  wrap.append(h('div', { class: 'eyebrow', text: [`Round ${m.round}`, m.date ? fmtDate(m.date) : null, info.att ? 'Attendance ' + info.att.toLocaleString('en-GB') : null, info.ref ? 'Referee ' + info.ref : null].filter(Boolean).join(' · ') }));
+  wrap.append(h('div', { class: 'eyebrow', text: [m.cup ? [m.comp, m.round].filter(Boolean).join(' · ') : `Round ${m.round}`, m.date ? fmtDate(m.date) : null, m.neutral ? 'Neutral venue' : null, info.att ? 'Attendance ' + info.att.toLocaleString('en-GB') : null, info.ref ? 'Referee ' + info.ref : null].filter(Boolean).join(' · ') }));
   const colOf = (id) => (id === T ? colA : colB);
   wrap.append(h('div', { class: 'scoreboard' },
     h('div', null, h('div', { class: 'tn', style: { color: colOf(home) }, text: teamName(home) }), h('div', { class: 'xgs', text: [m.forms[home], has(m.ts[home].xg) ? m.ts[home].xg.toFixed(2) + ' xG' : null].filter(Boolean).join(' · ') })),
-    h('div', { class: 'sc', text: m.hg + '–' + m.ag }),
+    h('div', { class: 'sc', text: m.hg + '–' + m.ag }, m.pens ? h('div', { class: 'xgs', style: { textAlign: 'center' }, text: `${m.pens.f}–${m.pens.a} on penalties` }) : null),
     h('div', null, h('div', { class: 'tn r', style: { color: colOf(away) }, text: teamName(away) }), h('div', { class: 'xgs', style: { textAlign: 'right' }, text: [has(m.ts[away].xg) ? m.ts[away].xg.toFixed(2) + ' xG' : null, m.forms[away]].filter(Boolean).join(' · ') }))));
   const scorers = (id) => m.timeline ? m.timeline.filter((t) => t.kind === 'goal' && t.team === id).map((t) => (DB.players[t.pl] ? DB.players[t.pl].name.split(' ').pop() : '?') + ' ' + t.min + "'" + (/penalty/i.test(t.detail) ? ' (p)' : /own/i.test(t.detail) ? ' (og)' : '')).join(', ') : m.events.filter((e) => e.type === 'shot' && e.out === 'goal' && e.team === id).map((e) => DB.players[e.pl].name.split(' ').pop() + ' ' + Math.floor(e.t / 60 + 1) + "'" + (e.sp === 'pen' ? ' (p)' : '')).join(', ');
   wrap.append(h('div', { class: 'scoreboard', style: { marginBottom: '16px' } }, h('div', { class: 'sub', text: scorers(home) }), h('div'), h('div', { class: 'sub', style: { textAlign: 'right' }, text: scorers(away) })));
@@ -910,7 +960,7 @@ function matchReport(m, T) {
     const aT = m.ts[T], aO = m.ts[O];
     const keys = statKeys(aT, aO);
     grid.append(h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '8px' }, text: 'Match stats' }),
-      keys.length ? butterfly(teamName(T), teamName(O), keys, aT, aO, colA, colB) : h('p', { class: 'empty', text: m.detail === false ? 'Details for this match have not been downloaded yet.' : 'No match stats in this data.' })));
+      keys.length ? butterfly(teamName(T), teamName(O), keys, aT, aO, colA, colB) : h('p', { class: 'empty', text: m.cup ? 'Cup match: only the result and match details are recorded (football-data.co.uk covers league matches only).' : m.detail === false ? 'Details for this match have not been downloaded yet.' : 'No match stats in this data.' })));
     const side = h('div', { class: 'stack' });
     if (m.odds) side.append(oddsBlock(m, T, colA, colB));
     if (m.timeline && m.timeline.length) side.append(h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '8px' }, text: 'Timeline' }), matchTimeline(m, T, colA, colB)));
@@ -1027,7 +1077,7 @@ function addFbref(texts, teamId, statusEl, opts = {}) {
   if (r.fields.length) parts.push(`${r.fields.map((f) => FB_FIELD_NAMES[f] || f).join(', ')} for ${r.rowsRead} ${teamName(teamId)} player${r.rowsRead === 1 ? '' : 's'} (${n} in the squad view)`);
   const fx = r.fixtures;
   if (fx) {
-    parts.push(`formations, possession, attendance and referees for ${fx.matched} of ${fx.played} ${teamName(teamId)} matches` + (fx.upcoming ? `, plus ${fx.upcoming} upcoming fixtures` : ''));
+    parts.push(`formations, possession, attendance and referees for ${fx.matched} of ${fx.played - fx.cups} ${teamName(teamId)} league matches` + (fx.cups ? `, ${fx.cups} cup tie${fx.cups > 1 ? 's' : ''}` : '') + (fx.upcoming ? `, plus ${fx.upcoming} upcoming fixtures` : ''));
     if (fx.unmatched.length) parts.push(`not matched to the loaded season (usually cup games): ${fx.unmatched.slice(0, 4).join('; ')}${fx.unmatched.length > 4 ? '…' : ''}`);
   }
   if (r.records) parts.push(`${teamName(teamId)}’s all-time record against ${r.records.clubs} clubs (${r.records.games.toLocaleString('en-GB')} matches)`);
@@ -1093,16 +1143,85 @@ function importTexts(texts, statusEl, opts = {}) {
   const label = DB.label, thisDB = DB;
   carriedFbref(label).then(async (keep) => {
     if (!keep.length && prevSnap === label) keep = snapshotFbref(DB); // keep the built-in FBref tables too
-    if (keep.length && DB === thisDB) {
+    const man = await carriedManual(label);
+    if ((keep.length || man.length) && DB === thisDB) {
       keep.forEach((f) => { if (DB.teamById[f.team]) addFbref(f.texts, f.team, null, { restore: true }); });
+      man.forEach((e) => applyManual(DB, e));
+      DB.manual = man.slice();
+      cache.clear();
       render();
-      flash(`Updated ${label}. Your ${keep.length} FBref table${keep.length > 1 ? 's were' : ' was'} added back.`);
+      const kept = [keep.length ? `${keep.length} FBref table${keep.length > 1 ? 's' : ''}` : '', man.length ? `${man.length} match${man.length > 1 ? 'es' : ''} you added` : ''].filter(Boolean).join(' and ');
+      flash(`Updated ${label}. Your ${kept} ${keep.length + man.length > 1 ? 'were' : 'was'} added back.`);
     }
-    const ok = await savePrimary(texts, label, keep);
+    const ok = await savePrimary(texts, label, keep, man);
     if (S.tab === 'data') render();
     if (!ok) flash('Loaded, but this browser would not save it, so it will be gone when you reload the page.', 'err');
   });
   return true;
+}
+// Hand-entered cup ties and fixtures, for competitions the data sources don't cover
+function addMatchCard() {
+  if (DB.source === 'demo') return null;
+  const T = S.team, st = h('div', { class: 'status', role: 'status' });
+  const inp = (id, a) => h('input', { id, ...a });
+  const dl = (id, items) => h('datalist', { id }, items.map((v) => h('option', { value: v })));
+  const date = inp('am-date', { type: 'date', required: true });
+  const time = inp('am-time', { type: 'time' });
+  const comp = inp('am-comp', { type: 'text', list: 'am-comps', value: 'League Cup', autocomplete: 'off' });
+  const round = inp('am-round', { type: 'text', list: 'am-rounds', placeholder: 'e.g. Semi-final', autocomplete: 'off' });
+  const opp = inp('am-opp', { type: 'text', list: 'am-teams', placeholder: 'Opponent', autocomplete: 'off' });
+  const venue = h('select', { id: 'am-venue' }, [['H', 'Home'], ['A', 'Away'], ['N', 'Neutral venue']].map(([v, l]) => h('option', { value: v, text: l })));
+  const gf = inp('am-gf', { type: 'number', min: 0, max: 30, inputmode: 'numeric', placeholder: '–' });
+  const ga = inp('am-ga', { type: 'number', min: 0, max: 30, inputmode: 'numeric', placeholder: '–' });
+  const pf = inp('am-pf', { type: 'number', min: 0, max: 30, inputmode: 'numeric', placeholder: '–' });
+  const pa = inp('am-pa', { type: 'number', min: 0, max: 30, inputmode: 'numeric', placeholder: '–' });
+  const field = (label, el, id) => h('div', { class: 'field' }, h('label', { for: id, text: label }), el);
+  const num = (el) => (el.value === '' ? null : Math.max(0, parseInt(el.value, 10)));
+  const err = (msg) => { st.className = 'status err'; st.textContent = msg; };
+  const form = h('form', { class: 'am-form', onsubmit: async (ev) => {
+    ev.preventDefault();
+    const e = { team: T, teamName: teamName(T), date: date.value, time: time.value, comp: comp.value.trim() || 'Cup', round: round.value.trim(), opp: opp.value.trim(), venue: venue.value, gf: num(gf), ga: num(ga) };
+    if (!e.date) return err('Enter the date.');
+    if (!e.opp) return err('Enter the opponent.');
+    if ((e.gf == null) !== (e.ga == null)) return err('Enter both scores for a played match, or leave both blank for an upcoming one.');
+    if (e.gf != null && (DB.leagueComp && e.comp === DB.leagueComp || /^(scottish )?premiership$/i.test(e.comp))) return err('League results come from the season file. Use this form for cup ties and other competitions.');
+    const p1 = num(pf), p2 = num(pa);
+    if (e.gf != null && e.gf === e.ga && p1 != null && p2 != null && p1 !== p2) e.pens = { f: p1, a: p2 };
+    e.id = e.team + '|' + e.date + '|' + fbTeamKey(e.opp);
+    applyManual(DB, e);
+    DB.manual = (DB.manual || []).filter((x) => x.id !== e.id).concat(e);
+    cache.clear();
+    const saved = await saveManual(e);
+    render();
+    flash(`${e.gf != null ? 'Added the result' : 'Added the fixture'}: ${e.comp}${e.round ? ' ' + e.round.toLowerCase() : ''} v ${e.opp} on ${fmtDate(e.date)}.` + (saved ? '' : ' This browser would not save it, so it will be gone when you reload.'), saved ? 'ok' : 'err');
+  } },
+    h('div', { class: 'am-grid' },
+      field('Date', date, 'am-date'), field('Kick-off (optional)', time, 'am-time'),
+      field('Competition', comp, 'am-comp'), field('Round', round, 'am-round'),
+      field('Opponent', opp, 'am-opp'), field('Venue', venue, 'am-venue')),
+    h('div', { class: 'am-score' },
+      h('span', { class: 'eyebrow', text: 'Score' }), field(teamName(T), gf, 'am-gf'), h('span', { text: '–' }), field('Opponent', ga, 'am-ga'),
+      h('span', { class: 'eyebrow', text: 'Penalties' }), field(teamName(T), pf, 'am-pf'), h('span', { text: '–' }), field('Opponent', pa, 'am-pa')),
+    h('p', { class: 'note', style: { margin: '4px 0 10px' }, text: 'Leave the score blank for an upcoming match. Penalties only for a level tie settled by a shootout.' }),
+    h('button', { class: 'btn', type: 'submit', text: 'Add match' }),
+    dl('am-comps', ['League Cup', 'Scottish Cup', 'Europa League', 'Conference League', 'Champions League', 'Friendly']),
+    dl('am-rounds', ['Group stage', 'Round of 16', 'Quarter-final', 'Semi-final', 'Final', 'First round', 'Second round', 'Third round', 'Fourth round', 'Fifth round']),
+    dl('am-teams', DB.teams.filter((t) => t.id !== T).map((t) => t.name)));
+  const mine = (DB.manual || []).filter((e) => e.team === T).sort((a, b) => a.date.localeCompare(b.date));
+  const list = mine.length ? h('div', { class: 'mlist', style: { marginTop: '12px' } }, mine.map((e) => {
+    let armed = false;
+    const rm = h('button', { class: 'btn ghost', type: 'button', style: { padding: '3px 10px', fontSize: '12.5px' }, text: 'Remove' });
+    rm.addEventListener('click', async () => {
+      if (!armed) { armed = true; rm.textContent = 'Click to confirm'; return; }
+      await removeManual(e.id);
+      // Rebuild from the saved log so the match is fully gone
+      if (await loadRealData()) { render(); flash('Removed ' + e.opp + ' on ' + fmtDate(e.date) + '.'); }
+    });
+    return h('div', { class: 'mrow', style: { cursor: 'default', gridTemplateColumns: '1fr auto' } },
+      h('span', null, `${fmtDate(e.date)} · ${e.comp}${e.round ? ' ' + e.round : ''} · ${e.venue === 'A' ? '@ ' : 'v '}${e.opp}${e.venue === 'N' ? ' (N)' : ''} · ${e.gf != null ? e.gf + '–' + e.ga + (e.pens ? ` (${e.pens.f}–${e.pens.a} pens)` : '') : 'upcoming'}`), rm);
+  })) : null;
+  return card('Add a match', `Cup ties and fixtures for ${teamName(T)} that the data sources don’t include · saved in this browser`, form, st,
+    list ? h('div', null, h('div', { class: 'eyebrow', style: { marginTop: '14px' }, text: 'Matches you added' }), list) : null);
 }
 function showDemo() {
   DB = DEMO; cache.clear();
@@ -1182,6 +1301,7 @@ function viewData(el) {
   el.append(h('div', { class: 'grid' },
     card('Data source', DB.label + (DB.snapshot ? ` · built-in data to ${fmtDate(DB.snapshot)}` : ''), prose, sourceSwitch()),
     fbrefCard(),
+    addMatchCard(),
     card('This season from football-data.co.uk', 'Free, no account or key · results, team stats and odds', h('div', { class: 'prose' },
       h('ol', null,
         h('li', null, 'Download this season’s Scottish Premiership file: ', h('a', { href: fdUrl, target: '_blank', rel: 'noopener', text: fdUrl.replace('https://www.', '') }), '. If the link does not work, go to ', h('a', { href: 'https://www.football-data.co.uk/scotlandm.php', target: '_blank', rel: 'noopener', text: 'football-data.co.uk/scotlandm.php' }), ' and click Premiership for the season you want.'),

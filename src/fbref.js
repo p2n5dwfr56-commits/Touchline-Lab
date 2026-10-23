@@ -30,23 +30,87 @@ function fbIsFixtures(rows) {
 const fbTeamKey = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
   .replace(/heart of midlothian/, 'hearts').replace(/\butd\b/, 'united').replace(/\b(fc|afc)\b/g, '').replace(/[^a-z0-9]+/g, '');
 const fbDays = (a, b) => Math.abs(Date.parse(a + 'T12:00:00Z') - Date.parse(b + 'T12:00:00Z')) / 864e5;
+/* ---------- Cup matches and fixtures (from FBref, or entered by hand) ---------- */
+// A club outside the loaded league (e.g. a lower-division cup opponent) gets a name-only team entry.
+function fbEnsureTeam(db, name) {
+  const key = fbTeamKey(name);
+  const t = db.teams.find((x) => fbTeamKey(x.name) === key);
+  if (t) return t.id;
+  const id = 'x-' + key;
+  if (!db.teamById[id]) db.teamById[id] = { id, name, style: null, nonLeague: true };
+  return id;
+}
+const fbVenue = (s) => (/neutral/i.test(s) ? 'N' : /home/i.test(s) || s === 'H' ? 'H' : 'A');
+// A cup match: results and match info only (no team match stats), kept apart from the league in db.cups.
+function addCupMatch(db, teamId, o) {
+  const oppId = fbEnsureTeam(db, o.opp);
+  const H = o.venue === 'A' ? oppId : teamId, A = o.venue === 'A' ? teamId : oppId;
+  const ts = {};
+  [teamId, oppId].forEach((T) => {
+    const s = blankTeam();
+    Object.keys(s).forEach((k) => { if (typeof s[k] === 'number') s[k] = NaN; });
+    s.n = 1; s.g = T === teamId ? o.gf : o.ga; s.ga = T === teamId ? o.ga : o.gf;
+    s.w = s.g > s.ga ? 1 : 0; s.d = s.g === s.ga ? 1 : 0; s.l = s.g < s.ga ? 1 : 0; s.pts = 3 * s.w + s.d;
+    if (has(o.poss)) { s.posT = T === teamId ? o.poss : 100 - o.poss; s.oposT = 100 - s.posT; }
+    ts[T] = s;
+  });
+  const m = {
+    id: 'cup-' + o.date + '-' + oppId, cup: true, comp: o.comp || 'Cup', round: o.round || '', date: o.date, neutral: o.venue === 'N',
+    // pens are stored home-first, like hg/ag; o.pens is from this team's side
+    home: H, away: A, hg: H === teamId ? o.gf : o.ga, ag: H === teamId ? o.ga : o.gf, pens: o.pens ? (H === teamId ? { f: o.pens.f, a: o.pens.a } : { f: o.pens.a, a: o.pens.f }) : null,
+    forms: {}, lineups: {}, subs: {}, minutes: {}, events: [], poss: [], ts, ps: {}, timeline: [], detail: false, manual: !!o.manual,
+    info: { att: o.att || null, ref: o.ref || '', captain: o.captain || '' },
+  };
+  if (o.form) m.forms[teamId] = o.form;
+  if (o.oform) m.forms[oppId] = o.oform;
+  db.cups = (db.cups || []).filter((x) => x.id !== m.id).concat(m).sort((a, b) => a.date.localeCompare(b.date));
+  // A played match is no longer upcoming
+  if (db.fixtures && db.fixtures[teamId]) db.fixtures[teamId] = db.fixtures[teamId].filter((f) => !(f.date === o.date && fbTeamKey(f.opp) === fbTeamKey(o.opp)));
+  return m;
+}
+function addFixture(db, teamId, f) {
+  db.fixtures = db.fixtures || {};
+  const list = (db.fixtures[teamId] || []).filter((x) => !(x.date === f.date && fbTeamKey(x.opp) === fbTeamKey(f.opp)));
+  const known = db.teams.find((x) => fbTeamKey(x.name) === fbTeamKey(f.opp));
+  list.push({ date: f.date, time: f.time || '', comp: f.comp || '', round: f.round || '', venue: f.venue, home: f.venue === 'H', opp: f.opp, oppId: known ? known.id : null, manual: !!f.manual });
+  db.fixtures[teamId] = list.sort((a, b) => a.date.localeCompare(b.date));
+}
+// Goals like "1 (4)" mean a penalty shootout: score 1, shootout 4
+const fbGoals = (s) => { const m = String(s || '').match(/^\s*(\d+)(?:\s*\((\d+)\))?/); return m ? { g: +m[1], p: m[2] != null ? +m[2] : null } : null; };
+
 function attachFixtures(db, teamId, rows) {
   const hi = rows.findIndex((r) => { const c = r.map((x) => x.trim()); return c.includes('Date') && c.includes('Opponent'); });
   const H = rows[hi].map((x) => x.trim()), col = (n) => H.indexOf(n);
-  const i = { date: col('Date'), time: col('Time'), comp: col('Comp'), venue: col('Venue'), res: col('Result'), opp: col('Opponent'), poss: col('Poss'), att: col('Attendance'), cap: col('Captain'), form: col('Formation'), oform: col('Opp Formation'), ref: col('Referee') };
+  const i = { date: col('Date'), time: col('Time'), comp: col('Comp'), round: col('Round'), venue: col('Venue'), res: col('Result'), gf: col('GF'), ga: col('GA'), opp: col('Opponent'), poss: col('Poss'), att: col('Attendance'), cap: col('Captain'), form: col('Formation'), oform: col('Opp Formation'), ref: col('Referee') };
   const cell = (r, k) => (i[k] >= 0 ? String(r[i[k]] || '').trim() : '');
   const byKey = {};
   db.teams.forEach((t) => (byKey[fbTeamKey(t.name)] = t.id));
   const upcoming = [], unmatched = [];
-  let played = 0, matched = 0;
-  rows.slice(hi + 1).forEach((r) => {
-    const date = cell(r, 'date');
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return; // repeated headers, blank rows
-    const opp = cell(r, 'opp'), oppId = byKey[fbTeamKey(opp)] || null, home = /home/i.test(cell(r, 'venue'));
-    if (!cell(r, 'res')) { upcoming.push({ date, time: cell(r, 'time'), comp: cell(r, 'comp'), home, opp, oppId }); return; }
+  let played = 0, matched = 0, cups = 0;
+  const data = rows.slice(hi + 1).filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(cell(r, 'date'))); // skip repeated headers, blank rows
+  const findLeague = (r) => {
+    const opp = cell(r, 'opp'), oppId = byKey[fbTeamKey(opp)] || null, home = fbVenue(cell(r, 'venue')) === 'H', date = cell(r, 'date');
+    return oppId && db.matches.find((x) => (home ? x.home === teamId && x.away === oppId : x.away === teamId && x.home === oppId) && x.date && fbDays(x.date, date) <= 1);
+  };
+  // The league is whichever competition the rows matching league matches belong to
+  const leagueRow = data.find((r) => cell(r, 'res') && findLeague(r));
+  const leagueComp = leagueRow ? cell(leagueRow, 'comp') : null;
+  data.forEach((r) => {
+    const date = cell(r, 'date'), opp = cell(r, 'opp'), comp = cell(r, 'comp'), venue = fbVenue(cell(r, 'venue'));
+    const isCup = leagueComp ? comp !== leagueComp : false;
+    if (!cell(r, 'res')) { upcoming.push({ date, time: cell(r, 'time'), comp, round: isCup ? cell(r, 'round') : '', venue, home: venue === 'H', opp, oppId: byKey[fbTeamKey(opp)] || null }); return; }
     played++;
-    const m = oppId && db.matches.find((x) => (home ? x.home === teamId && x.away === oppId : x.away === teamId && x.home === oppId) && x.date && fbDays(x.date, date) <= 1);
-    if (!m) { unmatched.push(`${date} ${cell(r, 'comp')} v ${opp}`); return; }
+    if (isCup) {
+      const gf = fbGoals(cell(r, 'gf')), ga = fbGoals(cell(r, 'ga'));
+      if (!gf || !ga) { unmatched.push(`${date} ${comp} v ${opp}`); return; }
+      const att = parseInt(cell(r, 'att').replace(/,/g, ''), 10), poss = parseFloat(cell(r, 'poss'));
+      addCupMatch(db, teamId, { date, comp, round: cell(r, 'round'), opp, venue, gf: gf.g, ga: ga.g, pens: gf.p != null && ga.p != null ? { f: gf.p, a: ga.p } : null, poss: Number.isFinite(poss) ? poss : NaN, att: Number.isFinite(att) ? att : null, ref: cell(r, 'ref'), captain: cell(r, 'cap'), form: cell(r, 'form').replace(/[^\d-]/g, ''), oform: cell(r, 'oform').replace(/[^\d-]/g, '') });
+      cups++;
+      return;
+    }
+    const m = findLeague(r);
+    const oppId = byKey[fbTeamKey(opp)] || null;
+    if (!m) { unmatched.push(`${date} ${comp} v ${opp}`); return; }
     matched++;
     const f = cell(r, 'form').replace(/[^\d-]/g, ''), of = cell(r, 'oform').replace(/[^\d-]/g, '');
     if (f) m.forms[teamId] = f;
@@ -61,8 +125,11 @@ function attachFixtures(db, teamId, rows) {
     m.info = { ...(m.info || {}), att: Number.isFinite(att) ? att : null, ref: cell(r, 'ref'), captain: cell(r, 'cap') };
   });
   db.fixtures = db.fixtures || {};
-  db.fixtures[teamId] = upcoming.sort((a, b) => a.date.localeCompare(b.date));
-  return { played, matched, unmatched, upcoming: upcoming.length };
+  // Keep fixtures entered by hand; FBref's list replaces the rest
+  const manual = (db.fixtures[teamId] || []).filter((f) => f.manual && !upcoming.some((u) => u.date === f.date && fbTeamKey(u.opp) === fbTeamKey(f.opp)));
+  db.fixtures[teamId] = upcoming.concat(manual).sort((a, b) => a.date.localeCompare(b.date));
+  if (leagueComp) db.leagueComp = leagueComp;
+  return { played, matched, unmatched, upcoming: upcoming.length, cups, leagueComp };
 }
 
 // Team "Records vs Opponents" table: one row per club played, with matches, wins, draws, losses and goals

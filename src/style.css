@@ -137,6 +137,15 @@ td .pos { color: var(--muted); font-size: 12px; margin-left: 6px; }
 .wdl .W { background: var(--good); } .wdl .D { background: var(--muted); } .wdl .L { background: var(--bad); }
 .opp-table th.grp { text-align: center; border-bottom: 1px solid var(--rule-2); color: var(--ink-2); }
 
+/* ---------- Add a match ---------- */
+.am-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 10px; }
+.am-form input { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--rule-2); border-radius: 4px; padding: 5px 9px; width: 100%; min-width: 0; }
+.am-score { display: grid; grid-template-columns: auto minmax(60px, 90px) auto minmax(60px, 90px); gap: 6px 10px; align-items: end; margin-top: 12px; max-width: 420px; }
+.am-score > span:not(.eyebrow) { padding-bottom: 7px; color: var(--muted); }
+.am-score .eyebrow { padding-bottom: 8px; }
+.cup-next { padding: 10px 12px; background: var(--surface-2); border-radius: var(--radius); }
+.cup-next-line { font-size: 16px; margin-top: 2px; }
+
 /* ---------- Match timeline ---------- */
 .timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; font-size: 13.5px; }
 .timeline li { display: grid; grid-template-columns: 38px 10px 56px 1fr; gap: 8px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--rule); }
