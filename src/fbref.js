@@ -44,6 +44,9 @@ const fbVenue = (s) => (/neutral/i.test(s) ? 'N' : /home/i.test(s) || s === 'H' 
 // A cup match: results and match info only (no team match stats), kept apart from the league in db.cups.
 function addCupMatch(db, teamId, o) {
   const oppId = fbEnsureTeam(db, o.opp);
+  // The same tie already loaded with full detail (API-Football) wins over results-only versions
+  const full = (db.cups || []).find((x) => x.id.startsWith('afc-') && x.date && fbDays(x.date, o.date) <= 1 && [x.home, x.away].includes(teamId) && [x.home, x.away].includes(oppId));
+  if (full) { full.info = { att: o.att || null, ref: o.ref || '', captain: o.captain || '', ...full.info }; return full; }
   const H = o.venue === 'A' ? oppId : teamId, A = o.venue === 'A' ? teamId : oppId;
   const ts = {};
   [teamId, oppId].forEach((T) => {

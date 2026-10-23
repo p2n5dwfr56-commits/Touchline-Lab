@@ -6,10 +6,12 @@
   https://dashboard.api-football.com (or a RapidAPI key with --rapidapi).
 
     API_FOOTBALL_KEY=your_key node tools/fetch-api-football.mjs --season 2025
+    API_FOOTBALL_KEY=your_key node tools/fetch-api-football.mjs --league 185 --season 2026   # League Cup 2026/27
     API_FOOTBALL_KEY=your_key node tools/fetch-api-football.mjs --find "Premiership"
 
   Options
-    --league <id>   League id (default 179, Scottish Premiership). Use --find to look one up.
+    --league <id>   League id (default 179, Scottish Premiership; 185 League Cup, 181 Scottish Cup).
+                    Use --find to look one up. Cup files are added to the league season in the app.
     --season <year> Season start year, e.g. 2025 for 2025/26 (default: current season).
     --out <file>    Output file (default: api-football-<league>-<season>.json).
     --find <text>   List leagues matching the text, with their ids and seasons, then stop.

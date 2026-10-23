@@ -18,6 +18,7 @@ belongs to that browser on that device.
 
 ## Layout
 - `src/engine.js` – data model, demo-season simulator, StatsBomb importer, all metrics
+- `src/afcup.js` – API-Football cup files (League Cup, Scottish Cup) added to the league season with full detail
 - `src/ui.js` – views and charts (plain JS + SVG, no libraries)
 - `src/tactics.js` – Tactics tab: formations, tactical line-up board, shape numbers
 - `src/apifootball.js` – API-Football importer (match/player stats, line-ups, formations)
@@ -159,3 +160,17 @@ a points race of this season against earlier ones, and players' numbers season b
 
 Snapshot builds embed past seasons from `data/snapshot/past/` via the manifest's `past` list
 (`{season, files, layers}`); unused CSV columns and Sportmonks stat types are dropped to keep the page small.
+
+## Cup matches with full detail
+API-Football covers the Scottish League Cup (league 185) and Scottish Cup (181) with line-ups, events,
+team and player stats. Run the download on your own computer, not a cloud server (API-Football suspends
+keys used from shared IPs), and note the current season needs a paid plan:
+
+```sh
+API_FOOTBALL_KEY=your_key node tools/fetch-api-football.mjs --league 185 --season 2026
+```
+
+Drop the file into the Data tab on top of the league season. Teams and players are matched by name to the
+league data (including API-Football's short names such as "K. Nisbet"), and the same ties from FBref or the
+Add a match form give way to the detailed version. With cup detail loaded, team and player stats, Key players
+and the match list follow the Competition filter; the league table stays league only.

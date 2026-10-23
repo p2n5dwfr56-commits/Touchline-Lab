@@ -93,9 +93,15 @@ function hover(el, fn) {
 }
 
 /* ---------- Selection ---------- */
+// League matches, plus cup matches with full match detail (API-Football) as the Competition filter says
 function teamMatches(T, venue = S.venue) {
-  return DB.matches.filter((m) => (m.home === T || m.away === T) && (venue === 'all' || (venue === 'home' ? m.home === T : m.away === T)));
+  const inV = (m) => venue === 'all' || (!m.neutral && (venue === 'home' ? m.home === T : m.away === T));
+  const lg = DB.matches.filter((m) => (m.home === T || m.away === T) && inV(m));
+  if (S.comp === 'league' || !hasCupDetail()) return lg;
+  const cups = (DB.cups || []).filter((m) => m.detail && m.ts && (m.home === T || m.away === T) && inV(m));
+  return (S.comp === 'cups' ? cups : lg.concat(cups)).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 }
+const hasCupDetail = () => (DB.cups || []).some((m) => m.detail && m.ts);
 function scoped(T, range = S.range) {
   const ms = teamMatches(T);
   if (range.startsWith('m:')) { const m = ms.find((x) => x.id === range.slice(2)); return m ? [m] : ms; }
@@ -127,7 +133,7 @@ const scoreText = (m, T) => goalsFor(m, T) + '–' + goalsAg(m, T) + (m.pens ? `
 // League matches plus cup matches, by the Competition filter. Stats views stay on teamMatches (league only).
 function compMatches(T, comp = S.comp, venue = S.venue) {
   const inVenue = (m) => venue === 'all' || (!m.neutral && (venue === 'home' ? m.home === T : m.away === T));
-  const league = comp === 'cups' ? [] : teamMatches(T, venue);
+  const league = comp === 'cups' ? [] : DB.matches.filter((m) => (m.home === T || m.away === T) && (venue === 'all' || (venue === 'home' ? m.home === T : m.away === T)));
   const cups = comp === 'league' ? [] : (DB.cups || []).filter((m) => (m.home === T || m.away === T) && inVenue(m));
   return league.concat(cups).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 }
@@ -439,7 +445,7 @@ function renderChrome() {
     [['all', 'Home & away'], ['home', 'Home'], ['away', 'Away']].map(([v, l]) => h('option', { value: v, selected: S.venue === v, text: l })));
   // Competition filter: only when this team has cup matches
   const compSel = hasCups(S.team) ? h('div', { class: 'field' }, h('label', { for: 'f-comp', text: 'Competition' }),
-    h('select', { id: 'f-comp', title: 'Applies to results, form, matches, formations and opponents. Team stats and the league table are league only.', onchange: (e) => { S.comp = e.target.value; render(); } },
+    h('select', { id: 'f-comp', title: hasCupDetail() ? 'Applies everywhere, including team and player stats. The league table stays league only.' : 'Applies to results, form, matches, formations and opponents. Team stats and the league table are league only (load an API-Football cup file for cup stats).', onchange: (e) => { S.comp = e.target.value; render(); } },
       [['all', 'All competitions'], ['league', 'League only'], ['cups', 'Cups only']].map(([v, l]) => h('option', { value: v, selected: S.comp === v, text: l })))) : null;
   filtersEl.replaceChildren(...[
     seasonSelect(),
@@ -514,7 +520,7 @@ function viewOverview(el) {
   const A = css('--team-a'), B = css('--ink-2');
   const val = (m, k) => (has(m.ts[T][k]) ? m.ts[T][k] : 0);
   lineChart(box, {
-    labels: all.map((m) => 'R' + m.round),
+    labels: all.map((m) => roundLabel(m)),
     series: [{ name: unit + ' for', color: A, values: all.map((m) => val(m, kF)) }, { name: unit + ' against', color: B, dash: '5 4', values: all.map((m) => val(m, kA)) }],
     yFmt: (v) => v.toFixed(v % 1 ? 1 : 0),
     tipFor: (i) => { const m = all[i]; return [{ v: matchLabel(m, T) }, { v: `${result(m, T)} ${goalsFor(m, T)}–${goalsAg(m, T)}`, strong: true }, { color: A, v: fmt(m.ts[T][kF], useXg ? 2 : 0), l: unit + ' for' }, { color: B, v: fmt(m.ts[T][kA], useXg ? 2 : 0), l: unit + ' against' }]; },
@@ -1101,6 +1107,24 @@ function addFbref(texts, teamId, statusEl, opts = {}) {
   flash('Added ' + parts.join('. ') + '.' + (r.errors.length ? ' ' + r.errors.join(' ') : '') + ' Paste more FBref tables in the Data tab to fill in more.');
   return true;
 }
+// Attach an API-Football cup download (full match detail) to the loaded season
+function addAfCup(parsed, texts, statusEl, opts = {}) {
+  const say = (msg) => { if (statusEl) { statusEl.className = 'status err'; statusEl.textContent = msg; } return false; };
+  if (DB.source === 'demo' || DB.source === 'sample' || DB.transient && !DB.pastSeason) return say('Load the league season first (for example this season’s football-data.co.uk file), then add the cup file to it.');
+  const lg = afCupLeague(parsed);
+  const sk = lg && lg.season ? lg.season + '/' + String((lg.season + 1) % 100).padStart(2, '0') : '';
+  if (sk && DB.season && sk !== DB.season) return say(`This ${lg.name} file is for ${sk}, but ${DB.season} is loaded. Pick ${sk} with Season at the top first (or download --season ${String(DB.season).slice(0, 4)}).`);
+  const r = attachApiFootballCups(DB, parsed);
+  cache.clear();
+  if (opts.restore) return true;
+  const files = texts.filter((t) => parsed.some((p) => p.name === t.name)).map((f) => ({ name: f.name, text: f.text }));
+  if (DB.pastSeason) { const k = DB.season; Promise.all(files.map((f) => pastAddLayer(k, f))).then(refreshSeasons); }
+  else saveLayers(files);
+  S.comp = 'all'; S.tab = 'matches'; S.match = null;
+  render();
+  flash(`Added ${r.comp} ${sk}: ${r.matches} match${r.matches === 1 ? '' : 'es'}${r.detailed ? ` (${r.detailed} with line-ups, team and player stats)` : ''}${r.upcoming ? `, plus ${r.upcoming} upcoming` : ''}. Use Competition at the top to see cups with or without the league.`);
+  return true;
+}
 // Attach Sportmonks downloads (line-ups, events, per-player match stats) to the loaded season
 function addSportmonks(files, statusEl, opts = {}) {
   const say = (msg) => { if (statusEl) { statusEl.className = 'status err'; statusEl.textContent = msg; } return false; };
@@ -1187,6 +1211,8 @@ function importTexts(texts, statusEl, opts = {}) {
     if (sm.length) ok = addSportmonks(sm, statusEl, opts) && ok;
     return ok;
   }
+  // API-Football cup files (League Cup, Scottish Cup) add to the season already loaded
+  if (!csv.length && parsed.length && isApiFootball(parsed) && afCupLeague(parsed)) return addAfCup(parsed, texts, statusEl, opts);
   const kind = csv.length ? 'fd' : isApiFootball(parsed) ? 'af' : 'sb';
   const { db, errors } = kind === 'fd' ? importFootballData(csv) : kind === 'af' ? importApiFootball(parsed) : importStatsBomb(parsed);
   // An older season than the current one is kept as a past season, not instead of it
@@ -1335,7 +1361,7 @@ function savedPanel() {
   const when = new Date(m.savedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   const what = [m.label || m.files.join(', ')];
   if (m.fbTables) what.push(`${m.fbTables} FBref table${m.fbTables > 1 ? 's' : ''} (${m.fbTeams.join(', ')})`);
-  if (m.layers && m.layers.length) what.push('Sportmonks data');
+  if (m.layers && m.layers.length) what.push(m.layers.length + ' downloaded file' + (m.layers.length > 1 ? 's' : '') + ' (Sportmonks, cups)');
   if (m.manual) what.push(`${m.manual} match${m.manual > 1 ? 'es' : ''} you added`);
   let armed = false;
   const btn = h('button', { class: 'btn ghost', type: 'button', text: 'Forget saved data' });
@@ -1404,6 +1430,11 @@ function viewData(el) {
       h('p', null, 'There are no player stats or line-ups in this file, and older seasons have no xG. The site keeps it updated through the season, so download it again for the latest results.'))),
     card('Import data', 'football-data.co.uk, API-Football or StatsBomb files · they stay in your browser, nothing is uploaded', drop, status, savedPanel(),
       h('p', { class: 'note' }, 'StatsBomb: the quickest route is ', h('code', { text: 'node tools/fetch-statsbomb.mjs --list' }), ' then ', h('code', { text: 'node tools/fetch-statsbomb.mjs --competition 55 --season 282' }), ' (Euro 2024), which saves one file with every event and the 360 player positions; drop it here. Raw files from the open-data repository also work: events from data/events/, 360 files from data/three-sixty/ and data/matches/<competition_id>/<season_id>.json. Event data is shown for the visit and not saved, so your saved season stays.')),
+    card('Cup matches from API-Football', 'League Cup and Scottish Cup with the same detail as league matches · paid plan for the current season', h('div', { class: 'prose' },
+      h('ol', null,
+        h('li', null, 'On your own computer (API-Football flags downloads from shared cloud servers), with Node.js 18+ and the Touchline Lab repository, run:', h('pre', { class: 'cmd', text: 'API_FOOTBALL_KEY=your_key node tools/fetch-api-football.mjs --league 185 --season 2026' }), '185 is the Scottish League Cup and 181 the Scottish Cup; the season is the starting year (2026 = 2026/27).'),
+        h('li', null, 'Drop the saved ', h('code', { text: 'api-football-185-2026.json' }), ' into the import box. It is added to the season on screen and saved with your other imports.')),
+      h('p', null, 'Each tie comes in with line-ups and formations, goals, cards and substitutions, team stats and player stats. Team and player numbers, Key players and the match list then follow the Competition filter at the top (All competitions, League only, Cups only); the league table always stays league only.'))),
     card('Real Aberdeen data from API-Football', 'Free plan: seasons 2022/23 to 2024/25, about 95 matches a day', h('div', { class: 'prose' },
       h('ol', null,
         h('li', null, 'Get a free key at ', h('a', { href: 'https://dashboard.api-football.com', target: '_blank', rel: 'noopener', text: 'dashboard.api-football.com' }), '.'),
