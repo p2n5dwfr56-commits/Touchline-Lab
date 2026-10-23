@@ -1307,13 +1307,22 @@ function importTexts(texts, statusEl, opts = {}) {
   const fail = (msg) => { if (statusEl) { statusEl.className = 'status err'; statusEl.textContent = msg; } return false; };
   const prevSnap = DB && DB.snapshot ? DB.label : null; // replacing the built-in snapshot with a newer file for the same season
   // CSV files (football-data.co.uk) and JSON files (API-Football, StatsBomb) are told apart by content.
-  const csv = [], parsed = [], fb = [], sm = [], evb = [];
+  const csv = [], parsed = [], fb = [], sm = [], evb = [], att = [];
   texts.forEach((f) => {
     const t = f.text.replace(/^﻿/, '').trimStart();
-    if (t[0] === '[' || t[0] === '{') { const data = JSON.parse(t); if (smIsBundle(data)) sm.push({ name: f.name, text: f.text, data }); else if (data && data.source === 'touchline-events') evb.push(data); else parsed.push({ name: f.name, data }); }
+    if (t[0] === '[' || t[0] === '{') { const data = JSON.parse(t); if (smIsBundle(data)) sm.push({ name: f.name, text: f.text, data }); else if (data && data.source === 'touchline-events') evb.push(data); else if (isAttendanceFile(data)) att.push({ name: f.name, text: f.text, data }); else parsed.push({ name: f.name, data }); }
     else if (fdIsCSV(fdParseCSV(t))) csv.push({ name: f.name, rows: fdParseCSV(t) });
     else if (fbIsHistory(t) || fbIsLeagueTable(t) || fbIsWikiAttendance(t) || fbIsTable(fbParse(t)) || fbIsFixtures(fbParse(t)) || fbIsRecords(fbParse(t))) fb.push({ name: f.name, text: t });
   });
+  // Attendance files add to every season's attendance chart, whatever is loaded
+  if (att.length && !csv.length && !parsed.length && !fb.length && !sm.length && !evb.length) {
+    const r = att.map((f) => addAttendanceFile(f.data));
+    if (!opts.restore) Promise.all(att.map((f) => saveAttendanceFile(f))).then((ok) => { if (ok.includes(false)) flash('Loaded, but this browser would not save the attendance file.', 'err'); });
+    cache.clear();
+    S.tab = 'seasons'; render();
+    flash(`Added average home attendances for ${r.reduce((a, x) => a + x.seasons, 0)} seasons from Wikipedia (see Home attendances in the Seasons tab).`);
+    return true;
+  }
   // Event data (from tools/fetch-statsbomb.mjs): shown for this visit, not saved, so saved season data stays as it is
   if (evb.length) {
     DB = eventsDB(evb[0]); DB.source = 'import'; DB.transient = true;
@@ -1605,6 +1614,7 @@ function boot() {
     const restored = await restoreSaved();
     if (!(restored && restored.ok)) loadSnapshot(); // no saved imports: open on the built-in real data, if this build has it
     await refreshSeasons();
+    await restoreAttendance();
     render();
     if (restored && restored.error) flash(restored.error, 'err');
     else if (restored && STORE.meta) flash(`Restored your saved data: ${STORE.meta.label || STORE.meta.files.join(', ')}${STORE.meta.fbTables ? ` + ${STORE.meta.fbTables} FBref table${STORE.meta.fbTables > 1 ? 's' : ''}` : ''}. Manage it in the Data tab.`);

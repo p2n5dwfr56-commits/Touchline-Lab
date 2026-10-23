@@ -1610,7 +1610,9 @@ function fbIsFixtures(rows) {
   return rows.slice(0, 60).some((r) => { const c = r.map((x) => x.trim()); return c.includes('Date') && c.includes('Opponent') && c.includes('Result'); });
 }
 const fbTeamKey = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-  .replace(/heart of midlothian/, 'hearts').replace(/\butd\b/, 'united').replace(/\b(fc|afc)\b/g, '').replace(/[^a-z0-9]+/g, '');
+  .replace(/heart of midlothian/, 'hearts').replace(/\butd\b/, 'united').replace(/\b(fc|afc)\b/g, '').replace(/[^a-z0-9]+/g, '')
+  // Short and full club names across sources ("Inverness C" / "Inverness Caledonian Thistle")
+  .replace(/^(inverness|partick|hamilton|dunfermline|queenofthesouth|raith)[a-z]*$/, '$1');
 const fbDays = (a, b) => Math.abs(Date.parse(a + 'T12:00:00Z') - Date.parse(b + 'T12:00:00Z')) / 864e5;
 /* ---------- Cup matches and fixtures (from FBref, or entered by hand) ---------- */
 // A club outside the loaded league (e.g. a lower-division cup opponent) gets a name-only team entry.
@@ -1866,6 +1868,16 @@ function attachLeagueAttendance(text, fallbackSeason) {
   let n = 0;
   rows.forEach((r) => { if (Number.isFinite(r.att) && r.att > 0) { S0[fbTeamKey(r.name)] = { name: r.name, att: r.att }; n++; } });
   return { season, teams: n };
+}
+// Attendance files from tools/fetch-wiki-attendance.mjs: { source: 'touchline-attendance', seasons: { '1996/97': { Club: average } } }
+const isAttendanceFile = (d) => d && d.source === 'touchline-attendance' && d.seasons && typeof d.seasons === 'object';
+function addAttendanceFile(d) {
+  let n = 0;
+  Object.entries(d.seasons || {}).forEach(([season, clubs]) => {
+    const S0 = (ATT[season] = ATT[season] || {});
+    Object.entries(clubs || {}).forEach(([name, att]) => { const k = fbTeamKey(name); if (Number.isFinite(att) && att > 0 && !S0[k]) { S0[k] = { name, att, src: 'wikipedia' }; n++; } });
+  });
+  return { seasons: Object.keys(d.seasons || {}).length, entries: n };
 }
 function noteHistoryAttendance(db) {
   Object.entries(db.fbHistory || {}).forEach(([key, Hh]) => Object.entries(Hh.league || {}).forEach(([season, f]) => {
@@ -3647,13 +3659,22 @@ function importTexts(texts, statusEl, opts = {}) {
   const fail = (msg) => { if (statusEl) { statusEl.className = 'status err'; statusEl.textContent = msg; } return false; };
   const prevSnap = DB && DB.snapshot ? DB.label : null; // replacing the built-in snapshot with a newer file for the same season
   // CSV files (football-data.co.uk) and JSON files (API-Football, StatsBomb) are told apart by content.
-  const csv = [], parsed = [], fb = [], sm = [], evb = [];
+  const csv = [], parsed = [], fb = [], sm = [], evb = [], att = [];
   texts.forEach((f) => {
     const t = f.text.replace(/^﻿/, '').trimStart();
-    if (t[0] === '[' || t[0] === '{') { const data = JSON.parse(t); if (smIsBundle(data)) sm.push({ name: f.name, text: f.text, data }); else if (data && data.source === 'touchline-events') evb.push(data); else parsed.push({ name: f.name, data }); }
+    if (t[0] === '[' || t[0] === '{') { const data = JSON.parse(t); if (smIsBundle(data)) sm.push({ name: f.name, text: f.text, data }); else if (data && data.source === 'touchline-events') evb.push(data); else if (isAttendanceFile(data)) att.push({ name: f.name, text: f.text, data }); else parsed.push({ name: f.name, data }); }
     else if (fdIsCSV(fdParseCSV(t))) csv.push({ name: f.name, rows: fdParseCSV(t) });
     else if (fbIsHistory(t) || fbIsLeagueTable(t) || fbIsWikiAttendance(t) || fbIsTable(fbParse(t)) || fbIsFixtures(fbParse(t)) || fbIsRecords(fbParse(t))) fb.push({ name: f.name, text: t });
   });
+  // Attendance files add to every season's attendance chart, whatever is loaded
+  if (att.length && !csv.length && !parsed.length && !fb.length && !sm.length && !evb.length) {
+    const r = att.map((f) => addAttendanceFile(f.data));
+    if (!opts.restore) Promise.all(att.map((f) => saveAttendanceFile(f))).then((ok) => { if (ok.includes(false)) flash('Loaded, but this browser would not save the attendance file.', 'err'); });
+    cache.clear();
+    S.tab = 'seasons'; render();
+    flash(`Added average home attendances for ${r.reduce((a, x) => a + x.seasons, 0)} seasons from Wikipedia (see Home attendances in the Seasons tab).`);
+    return true;
+  }
   // Event data (from tools/fetch-statsbomb.mjs): shown for this visit, not saved, so saved season data stays as it is
   if (evb.length) {
     DB = eventsDB(evb[0]); DB.source = 'import'; DB.transient = true;
@@ -3945,6 +3966,7 @@ function boot() {
     const restored = await restoreSaved();
     if (!(restored && restored.ok)) loadSnapshot(); // no saved imports: open on the built-in real data, if this build has it
     await refreshSeasons();
+    await restoreAttendance();
     render();
     if (restored && restored.error) flash(restored.error, 'err');
     else if (restored && STORE.meta) flash(`Restored your saved data: ${STORE.meta.label || STORE.meta.files.join(', ')}${STORE.meta.fbTables ? ` + ${STORE.meta.fbTables} FBref table${STORE.meta.fbTables > 1 ? 's' : ''}` : ''}. Manage it in the Data tab.`);
@@ -5972,4 +5994,14 @@ async function pastPut(season, change) {
 const pastAddPrimary = (season, texts) => pastPut(season, (c) => ({ ...c, primary: texts.map((t) => ({ name: t.name, text: t.text })) }));
 const pastAddLayer = (season, f) => pastPut(season, (c) => ({ ...c, layers: (c.layers || []).filter((l) => l.name !== f.name).concat({ name: f.name, text: f.text }) }));
 async function pastRemove(season) { const all = await pastGet(); delete all[season]; return storeSet('past', all); }
+
+/* Attendance files (Wikipedia), kept apart from the season logs */
+async function saveAttendanceFile(f) {
+  const list = ((await storeGet('attendance')) || []).filter((x) => x.name !== f.name).concat({ name: f.name, text: f.text });
+  return storeSet('attendance', list);
+}
+async function restoreAttendance() {
+  if (SNAP && SNAP.attendance) addAttendanceFile(SNAP.attendance);
+  ((await storeGet('attendance')) || []).forEach((f) => { try { addAttendanceFile(JSON.parse(f.text)); } catch (e) { /* skip a damaged file */ } });
+}
 </script>

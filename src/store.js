@@ -187,3 +187,13 @@ async function pastPut(season, change) {
 const pastAddPrimary = (season, texts) => pastPut(season, (c) => ({ ...c, primary: texts.map((t) => ({ name: t.name, text: t.text })) }));
 const pastAddLayer = (season, f) => pastPut(season, (c) => ({ ...c, layers: (c.layers || []).filter((l) => l.name !== f.name).concat({ name: f.name, text: f.text }) }));
 async function pastRemove(season) { const all = await pastGet(); delete all[season]; return storeSet('past', all); }
+
+/* Attendance files (Wikipedia), kept apart from the season logs */
+async function saveAttendanceFile(f) {
+  const list = ((await storeGet('attendance')) || []).filter((x) => x.name !== f.name).concat({ name: f.name, text: f.text });
+  return storeSet('attendance', list);
+}
+async function restoreAttendance() {
+  if (SNAP && SNAP.attendance) addAttendanceFile(SNAP.attendance);
+  ((await storeGet('attendance')) || []).forEach((f) => { try { addAttendanceFile(JSON.parse(f.text)); } catch (e) { /* skip a damaged file */ } });
+}

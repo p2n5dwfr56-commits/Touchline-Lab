@@ -28,7 +28,9 @@ function fbIsFixtures(rows) {
   return rows.slice(0, 60).some((r) => { const c = r.map((x) => x.trim()); return c.includes('Date') && c.includes('Opponent') && c.includes('Result'); });
 }
 const fbTeamKey = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-  .replace(/heart of midlothian/, 'hearts').replace(/\butd\b/, 'united').replace(/\b(fc|afc)\b/g, '').replace(/[^a-z0-9]+/g, '');
+  .replace(/heart of midlothian/, 'hearts').replace(/\butd\b/, 'united').replace(/\b(fc|afc)\b/g, '').replace(/[^a-z0-9]+/g, '')
+  // Short and full club names across sources ("Inverness C" / "Inverness Caledonian Thistle")
+  .replace(/^(inverness|partick|hamilton|dunfermline|queenofthesouth|raith)[a-z]*$/, '$1');
 const fbDays = (a, b) => Math.abs(Date.parse(a + 'T12:00:00Z') - Date.parse(b + 'T12:00:00Z')) / 864e5;
 /* ---------- Cup matches and fixtures (from FBref, or entered by hand) ---------- */
 // A club outside the loaded league (e.g. a lower-division cup opponent) gets a name-only team entry.
@@ -284,6 +286,16 @@ function attachLeagueAttendance(text, fallbackSeason) {
   let n = 0;
   rows.forEach((r) => { if (Number.isFinite(r.att) && r.att > 0) { S0[fbTeamKey(r.name)] = { name: r.name, att: r.att }; n++; } });
   return { season, teams: n };
+}
+// Attendance files from tools/fetch-wiki-attendance.mjs: { source: 'touchline-attendance', seasons: { '1996/97': { Club: average } } }
+const isAttendanceFile = (d) => d && d.source === 'touchline-attendance' && d.seasons && typeof d.seasons === 'object';
+function addAttendanceFile(d) {
+  let n = 0;
+  Object.entries(d.seasons || {}).forEach(([season, clubs]) => {
+    const S0 = (ATT[season] = ATT[season] || {});
+    Object.entries(clubs || {}).forEach(([name, att]) => { const k = fbTeamKey(name); if (Number.isFinite(att) && att > 0 && !S0[k]) { S0[k] = { name, att, src: 'wikipedia' }; n++; } });
+  });
+  return { seasons: Object.keys(d.seasons || {}).length, entries: n };
 }
 function noteHistoryAttendance(db) {
   Object.entries(db.fbHistory || {}).forEach(([key, Hh]) => Object.entries(Hh.league || {}).forEach(([season, f]) => {
