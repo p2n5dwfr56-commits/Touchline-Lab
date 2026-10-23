@@ -43,7 +43,7 @@ function fdDate(s) {
   const m = String(s || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
   if (!m) return '';
   let y = +m[3];
-  if (y < 100) y += 2000;
+  if (y < 100) y += y >= 70 ? 1900 : 2000; // 2-digit years in older files: 94 = 1994
   return `${y}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
 }
 const fdSlug = (s) => 'f' + String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -58,6 +58,7 @@ function importFootballData(csvFiles) {
     const iH = pick('HomeTeam', 'Home'), iA = pick('AwayTeam', 'Away'), iHG = pick('FTHG', 'HG'), iAG = pick('FTAG', 'AG');
     const iDiv = col('Div'), iDate = col('Date'), iLeague = col('League'), iSeason = col('Season');
     const odds = FD_ODDS.map((cols) => cols.map(col)).find((c) => c.every((i) => i >= 0));
+    const iAtt = col('Attendance');
     const stat = { HxG: col('HxG'), AxG: col('AxG'), HS: col('HS'), AS: col('AS'), HST: col('HST'), AST: col('AST'), HC: col('HC'), AC: col('AC'), HF: col('HF'), AF: col('AF'), HY: col('HY'), AY: col('AY'), HR: col('HR'), AR: col('AR') };
     f.rows.slice(1).forEach((r) => {
       const home = (r[iH] || '').trim(), away = (r[iA] || '').trim();
@@ -68,7 +69,7 @@ function importFootballData(csvFiles) {
       let key = iSeason >= 0 ? String(r[iSeason]).trim() : '';
       if (!key && date) { const y = +date.slice(0, 4), mo = +date.slice(5, 7); const s = mo >= 7 ? y : y - 1; key = `${s}/${String((s + 1) % 100).padStart(2, '0')}`; }
       const k = div + '|' + key;
-      (seasons[k] = seasons[k] || { div, season: key, rows: [] }).rows.push({ home, away, hg, ag, date, r, stat, odds });
+      (seasons[k] = seasons[k] || { div, season: key, rows: [] }).rows.push({ home, away, hg, ag, date, r, stat, odds, att: iAtt >= 0 ? parseInt(String(r[iAtt] || '').replace(/[^0-9]/g, ''), 10) : NaN });
     });
   });
   const keys = Object.keys(seasons);
@@ -106,10 +107,12 @@ function importFootballData(csvFiles) {
     matches.push({
       id: 'fd' + idx, round: Math.max(played[H], played[A]), date: x.date, home: H, away: A, hg: x.hg, ag: x.ag,
       forms: {}, lineups: { [H]: [], [A]: [] }, subs: { [H]: [], [A]: [] }, minutes: {}, events: [], poss: [], ts, ps: {}, timeline: [],
-      odds: Number.isFinite(pH) ? { h: pH, d: pD, a: pA } : null,
+      odds: Number.isFinite(pH) ? { h: pH, d: pD, a: pA } : null, att: Number.isFinite(x.att) && x.att > 0 ? x.att : null,
     });
   });
-  const label = `${FD_DIVISIONS[S0.div] || S0.div || 'League'} ${S0.season} (football-data.co.uk)`;
+  const y0 = parseInt(S0.season, 10);
+  const lname = S0.div === 'SC0' && y0 ? (y0 < 1998 ? 'Scottish Premier Division' : y0 < 2013 ? 'Scottish Premier League' : 'Scottish Premiership') : FD_DIVISIONS[S0.div] || S0.div || 'League';
+  const label = `${lname} ${S0.season} (football-data.co.uk)`;
   return { db: { source: 'football-data', label, season: S0.season, div: S0.div, teams: Object.values(teams), players: {}, matches }, errors };
 }
 

@@ -236,6 +236,19 @@ function kpPeriod(T, n) {
       return { season: x.season, detail };
     });
     aggPlayer.season = keep;
+    // Older seasons shorten first names ("A. Rooney"): fold those into the one full name at the club
+    // with the same initial and surname
+    const words = (n) => String(n || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z\s.]/g, '').split(/[\s.]+/).filter(Boolean);
+    Object.entries(players).forEach(([k, x]) => {
+      const w = words(x.p.name);
+      if (!(w.length === 2 && w[0].length === 1 && /\.\s/.test(x.p.name))) return;
+      const hits = Object.entries(players).filter(([k2, y]) => k2 !== k && y.p.team === x.p.team && (() => { const v = words(y.p.name); return v.length >= 2 && v[0].length > 1 && v[0][0] === w[0] && v[v.length - 1] === w[1]; })());
+      if (hits.length !== 1) return;
+      const [, y] = hits[0];
+      Object.entries(x.a).forEach(([f, v]) => { if (f === '_min') Object.entries(v).forEach(([f2, mv]) => (y.a._min[f2] = (y.a._min[f2] || 0) + mv)); else if (typeof v === 'number') y.a[f] = (y.a[f] || 0) + v; });
+      y.seasons += x.seasons;
+      delete players[k];
+    });
     const peers = { GK: {}, DEF: {}, MID: {}, FWD: {} };
     Object.values(players).forEach((x) => {
       if (!(x.a.min >= KP_MIN_PERIOD) || !peers[x.p.group]) return;

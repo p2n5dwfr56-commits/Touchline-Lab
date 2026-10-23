@@ -1506,7 +1506,7 @@ function fdDate(s) {
   const m = String(s || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
   if (!m) return '';
   let y = +m[3];
-  if (y < 100) y += 2000;
+  if (y < 100) y += y >= 70 ? 1900 : 2000; // 2-digit years in older files: 94 = 1994
   return `${y}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
 }
 const fdSlug = (s) => 'f' + String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -1521,6 +1521,7 @@ function importFootballData(csvFiles) {
     const iH = pick('HomeTeam', 'Home'), iA = pick('AwayTeam', 'Away'), iHG = pick('FTHG', 'HG'), iAG = pick('FTAG', 'AG');
     const iDiv = col('Div'), iDate = col('Date'), iLeague = col('League'), iSeason = col('Season');
     const odds = FD_ODDS.map((cols) => cols.map(col)).find((c) => c.every((i) => i >= 0));
+    const iAtt = col('Attendance');
     const stat = { HxG: col('HxG'), AxG: col('AxG'), HS: col('HS'), AS: col('AS'), HST: col('HST'), AST: col('AST'), HC: col('HC'), AC: col('AC'), HF: col('HF'), AF: col('AF'), HY: col('HY'), AY: col('AY'), HR: col('HR'), AR: col('AR') };
     f.rows.slice(1).forEach((r) => {
       const home = (r[iH] || '').trim(), away = (r[iA] || '').trim();
@@ -1531,7 +1532,7 @@ function importFootballData(csvFiles) {
       let key = iSeason >= 0 ? String(r[iSeason]).trim() : '';
       if (!key && date) { const y = +date.slice(0, 4), mo = +date.slice(5, 7); const s = mo >= 7 ? y : y - 1; key = `${s}/${String((s + 1) % 100).padStart(2, '0')}`; }
       const k = div + '|' + key;
-      (seasons[k] = seasons[k] || { div, season: key, rows: [] }).rows.push({ home, away, hg, ag, date, r, stat, odds });
+      (seasons[k] = seasons[k] || { div, season: key, rows: [] }).rows.push({ home, away, hg, ag, date, r, stat, odds, att: iAtt >= 0 ? parseInt(String(r[iAtt] || '').replace(/[^0-9]/g, ''), 10) : NaN });
     });
   });
   const keys = Object.keys(seasons);
@@ -1569,10 +1570,12 @@ function importFootballData(csvFiles) {
     matches.push({
       id: 'fd' + idx, round: Math.max(played[H], played[A]), date: x.date, home: H, away: A, hg: x.hg, ag: x.ag,
       forms: {}, lineups: { [H]: [], [A]: [] }, subs: { [H]: [], [A]: [] }, minutes: {}, events: [], poss: [], ts, ps: {}, timeline: [],
-      odds: Number.isFinite(pH) ? { h: pH, d: pD, a: pA } : null,
+      odds: Number.isFinite(pH) ? { h: pH, d: pD, a: pA } : null, att: Number.isFinite(x.att) && x.att > 0 ? x.att : null,
     });
   });
-  const label = `${FD_DIVISIONS[S0.div] || S0.div || 'League'} ${S0.season} (football-data.co.uk)`;
+  const y0 = parseInt(S0.season, 10);
+  const lname = S0.div === 'SC0' && y0 ? (y0 < 1998 ? 'Scottish Premier Division' : y0 < 2013 ? 'Scottish Premier League' : 'Scottish Premiership') : FD_DIVISIONS[S0.div] || S0.div || 'League';
+  const label = `${lname} ${S0.season} (football-data.co.uk)`;
   return { db: { source: 'football-data', label, season: S0.season, div: S0.div, teams: Object.values(teams), players: {}, matches }, errors };
 }
 
@@ -4859,6 +4862,19 @@ function kpPeriod(T, n) {
       return { season: x.season, detail };
     });
     aggPlayer.season = keep;
+    // Older seasons shorten first names ("A. Rooney"): fold those into the one full name at the club
+    // with the same initial and surname
+    const words = (n) => String(n || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z\s.]/g, '').split(/[\s.]+/).filter(Boolean);
+    Object.entries(players).forEach(([k, x]) => {
+      const w = words(x.p.name);
+      if (!(w.length === 2 && w[0].length === 1 && /\.\s/.test(x.p.name))) return;
+      const hits = Object.entries(players).filter(([k2, y]) => k2 !== k && y.p.team === x.p.team && (() => { const v = words(y.p.name); return v.length >= 2 && v[0].length > 1 && v[0][0] === w[0] && v[v.length - 1] === w[1]; })());
+      if (hits.length !== 1) return;
+      const [, y] = hits[0];
+      Object.entries(x.a).forEach(([f, v]) => { if (f === '_min') Object.entries(v).forEach(([f2, mv]) => (y.a._min[f2] = (y.a._min[f2] || 0) + mv)); else if (typeof v === 'number') y.a[f] = (y.a[f] || 0) + v; });
+      y.seasons += x.seasons;
+      delete players[k];
+    });
     const peers = { GK: {}, DEF: {}, MID: {}, FWD: {} };
     Object.values(players).forEach((x) => {
       if (!(x.a.min >= KP_MIN_PERIOD) || !peers[x.p.group]) return;
@@ -5136,7 +5152,21 @@ function viewSeasons(el) {
 }
 
 // Average home attendance by season for every club with figures (FBref)
+// Seasons whose football-data file lists each match's crowd (2000/01, 2001/02): average home attendance per club
+function fdAttendance() {
+  SEASONS.list.forEach((e) => {
+    if (ATT[e.season] && Object.keys(ATT[e.season]).length >= 3) return;
+    if (!e.primary.some((f) => /^[^\n]*\bAttendance\b/.test(f.text))) return;
+    const db = seasonDB(e.season);
+    if (!db) return;
+    const tot = {};
+    db.matches.forEach((m) => { if (m.att) { const t = (tot[m.home] = tot[m.home] || [0, 0]); t[0] += m.att; t[1]++; } });
+    const S0 = (ATT[e.season] = ATT[e.season] || {});
+    Object.entries(tot).forEach(([id, [sum, n]]) => { const nm = db.teamById[id].name, k = fbTeamKey(nm); if (n >= 5 && !S0[k]) S0[k] = { name: nm, att: Math.round(sum / n) }; });
+  });
+}
 function attendanceCard(grid, key) {
+  fdAttendance();
   const seasons = Object.keys(ATT).filter((k) => Object.keys(ATT[k]).length).sort();
   if (!seasons.length) return;
   const clubs = {};

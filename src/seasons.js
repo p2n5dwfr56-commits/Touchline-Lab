@@ -196,7 +196,21 @@ function viewSeasons(el) {
 }
 
 // Average home attendance by season for every club with figures (FBref)
+// Seasons whose football-data file lists each match's crowd (2000/01, 2001/02): average home attendance per club
+function fdAttendance() {
+  SEASONS.list.forEach((e) => {
+    if (ATT[e.season] && Object.keys(ATT[e.season]).length >= 3) return;
+    if (!e.primary.some((f) => /^[^\n]*\bAttendance\b/.test(f.text))) return;
+    const db = seasonDB(e.season);
+    if (!db) return;
+    const tot = {};
+    db.matches.forEach((m) => { if (m.att) { const t = (tot[m.home] = tot[m.home] || [0, 0]); t[0] += m.att; t[1]++; } });
+    const S0 = (ATT[e.season] = ATT[e.season] || {});
+    Object.entries(tot).forEach(([id, [sum, n]]) => { const nm = db.teamById[id].name, k = fbTeamKey(nm); if (n >= 5 && !S0[k]) S0[k] = { name: nm, att: Math.round(sum / n) }; });
+  });
+}
 function attendanceCard(grid, key) {
+  fdAttendance();
   const seasons = Object.keys(ATT).filter((k) => Object.keys(ATT[k]).length).sort();
   if (!seasons.length) return;
   const clubs = {};

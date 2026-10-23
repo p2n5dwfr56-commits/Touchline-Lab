@@ -224,3 +224,12 @@ changes), not in the page, so they stay current across republishes: the owner an
 from the page (Edit prices), everyone else reads them. Outside claude.ai the tab says the list is kept
 there. Aberdeen's 2026 prices were entered from the club's published menu; tick "Checked against the
 club's own published menu" once confirmed on afc.co.uk.
+
+## How far back
+Snapshot builds carry every Scottish top-flight season from 1994/95 (football-data.co.uk: results for all
+seasons; shots, corners and cards from 2002/03; odds from the mid-2000s; match attendances for 2000/01 and
+2001/02). League names follow the era (Premier Division to 1997/98, Scottish Premier League to 2012/13,
+Premiership since). Player season totals come from Sportmonks: minutes, goals, assists and cards from
+2010/11 (2009/10 partly), full player stats from 2019/20. Key players' longest period covers every season
+with player data; shortened names in older seasons ("A. Rooney") merge into the full name when one player
+at the club matches.
