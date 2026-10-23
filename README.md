@@ -139,6 +139,14 @@ Players with few minutes are pulled towards average. The tab also lists squad le
 without each starter, and **season improvement**: each player's early matches against his recent ones
 for match rating or a chosen stat, with a match-by-match trend and 3-match rolling average.
 
+With past seasons loaded, **Over** rates players across 3, 5, 8 or 10 seasons (or all): each player's
+league totals at the club are summed over the period and compared with every league player over the
+same seasons, and importance weighs playing time more (0.2 + 0.8 × √share of minutes). Sportmonks'
+free plan has detailed player stats from 2019/20; earlier seasons count only minutes, goals, assists,
+cards, goals conceded and team results, and players rated on those alone are marked *. Snapshot builds
+ship 2016/17 to 2022/23 as player season totals (`summarise` in the manifest, via
+`tools/season-summary.mjs`) to keep the page small; 2023/24 onwards ship match by match.
+
 ## Seasons
 Earlier seasons sit beside the current one. Drop a past season's football-data.co.uk file
 (e.g. https://www.football-data.co.uk/mmz4281/2425/SC0.csv) into the Data tab and it is saved as a

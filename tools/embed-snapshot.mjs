@@ -1,6 +1,7 @@
 // Prints `const SNAPSHOT = {...};` for build.sh: a bundled data snapshot the app loads when the viewer has no saved imports.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { seasonSummary } from './season-summary.mjs';
 const dir = process.argv[2];
 const m = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
 const file = (name) => ({ name: name.replace(/^.*\//, ''), text: compact(name, readFileSync(join(dir, name), 'utf8')) });
@@ -28,7 +29,9 @@ function compact(name, text) {
 }
 const snap = {
   asOf: m.asOf, primary: m.primary.map(file), fbref: (m.fbref || []).map((f) => ({ team: f.team, texts: f.files.map(file) })), layers: (m.layers || []).map(file),
-  past: (m.past || []).map((p) => ({ season: p.season, primary: p.files.map(file), layers: (p.layers || []).map(file) })),
+  // Older seasons: Sportmonks files are reduced to each player's season totals (p.summarise)
+  past: (m.past || []).map((p) => ({ season: p.season, primary: p.files.map(file), layers: (p.layers || []).map(file),
+    summary: p.summarise && p.summarise.length ? seasonSummary(readFileSync(join(dir, p.files[0]), 'utf8'), p.summarise.map((f) => readFileSync(join(dir, f), 'utf8'))) : undefined })),
 };
 // Escape "<" so file contents can never close the surrounding <script>
 process.stdout.write('const SNAPSHOT = ' + JSON.stringify(snap).replace(/</g, '\\u003c') + ';\n');

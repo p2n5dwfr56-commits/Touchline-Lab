@@ -16,12 +16,12 @@ const seasonShort = (s) => (s ? s.slice(2, 4) + '/' + s.slice(-2) : '');
 
 async function refreshSeasons() {
   const m = {};
-  ((SNAP && SNAP.past) || []).forEach((x) => (m[x.season] = { season: x.season, primary: x.primary, layers: x.layers || [], src: 'built-in' }));
+  ((SNAP && SNAP.past) || []).forEach((x) => (m[x.season] = { season: x.season, primary: x.primary, layers: x.layers || [], summary: x.summary || null, src: 'built-in' }));
   const saved = await pastGet();
   Object.entries(saved).forEach(([k, v]) => {
     const base = m[k] || { season: k, primary: [], layers: [] };
     const names = new Set((v.layers || []).map((l) => l.name));
-    m[k] = { season: k, primary: v.primary && v.primary.length ? v.primary : base.primary, layers: base.layers.filter((l) => !names.has(l.name)).concat(v.layers || []), src: v.primary && v.primary.length ? 'saved' : base.src, savedLayers: (v.layers || []).length, saved: true };
+    m[k] = { season: k, summary: base.summary || null, primary: v.primary && v.primary.length ? v.primary : base.primary, layers: base.layers.filter((l) => !names.has(l.name)).concat(v.layers || []), src: v.primary && v.primary.length ? 'saved' : base.src, savedLayers: (v.layers || []).length, saved: true };
   });
   SEASONS.list = Object.values(m).filter((x) => x.primary && x.primary.length).sort((a, b) => b.season.localeCompare(a.season));
 }
@@ -34,6 +34,13 @@ function seasonDB(season) {
   if (!db.matches.length) return null;
   prepareDB(db);
   e.layers.forEach((l) => { try { const b = JSON.parse(l.text); if (smIsBundle(b)) attachSportmonks(db, b); } catch (err) { /* skip a damaged file */ } });
+  // Built-in older seasons carry player season totals instead of every match
+  if (e.summary && !e.layers.length) {
+    db.seasonPS = {};
+    Object.entries(e.summary).forEach(([id, x]) => { if (!db.teamById[x.team]) return; db.players[id] = { id, team: x.team, name: x.name, group: x.group, role: x.role, num: x.num }; db.seasonPS[id] = x.a; });
+    db.hasPlayers = Object.keys(db.players).length > 0;
+    db.seasonSrc = 'Sportmonks season totals';
+  }
   db.pastSeason = true; db.transient = true;
   return (SEASON_DB[season] = db);
 }
@@ -75,7 +82,7 @@ function seasonRow(db, key) {
   const a = aggTeam(ms, t.id);
   let pts = 0;
   const race = ms.map((m) => (pts += result(m, t.id) === 'W' ? 3 : result(m, t.id) === 'D' ? 1 : 0));
-  return { db, t, pos: r ? r.pos : null, of: table.length, a, race, players: Object.keys(db.players || {}).length > 0, champ: table[0] && table[0].team.name };
+  return { db, t, pos: r ? r.pos : null, of: table.length, a, race, players: Object.keys(db.players || {}).length > 0 && !db.seasonSrc, champ: table[0] && table[0].team.name };
 }
 function viewSeasons(el) {
   const key = fbTeamKey(teamName(S.team));

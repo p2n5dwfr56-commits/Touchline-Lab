@@ -8,7 +8,8 @@
    StatsBomb, FBref or the demo season.
    ===================================================================== */
 
-const p90 = (k) => (a) => (has(a[k]) ? safe(a[k] * 90, a.min) : NaN);
+const minFor = (a, k) => (a._min && has(a._min[k]) ? a._min[k] : a.min); // multi-season totals: minutes in the seasons that recorded k
+const p90 = (k) => (a) => (has(a[k]) ? safe(a[k] * 90, minFor(a, k)) : NaN);
 const rate = (n, d) => (a) => (has(a[n]) && has(a[d]) && a[d] > 0 ? (100 * a[n]) / a[d] : NaN);
 // k, label, value from the player's totals, direction (1 higher is better), area, and the total shown in leaderboards
 const KP_METRICS = [
@@ -38,8 +39,8 @@ const KP_METRICS = [
   { k: 'aerPct', l: 'Headers won %', f: (a) => (has(a.aerW) && has(a.aerL) && a.aerW + a.aerL >= 5 ? (100 * a.aerW) / (a.aerW + a.aerL) : NaN), cat: 'duels', pct: true },
   { k: 'pLost', good: 'Keeps the ball', l: 'Possession lost per 100 touches', f: rate('pLost', 'touch'), cat: 'secure', dir: -1 },
   { k: 'disp', good: 'Rarely dispossessed', l: 'Dispossessed', f: p90('disp'), cat: 'secure', dir: -1, tot: 'disp' },
-  { k: 'err', good: 'Few costly errors', l: 'Errors leading to a shot or goal', f: (a) => (has(a.errSh) ? safe(((a.errSh || 0) + (has(a.errG) ? a.errG : 0)) * 90, a.min) : NaN), cat: 'secure', dir: -1 },
-  { k: 'onGD', l: 'Team goal difference while on', f: (a) => (has(a.onG) && has(a.onGA) ? safe((a.onG - a.onGA) * 90, a.min) : NaN), cat: 'impact' },
+  { k: 'err', good: 'Few costly errors', l: 'Errors leading to a shot or goal', f: (a) => (has(a.errSh) ? safe(((a.errSh || 0) + (has(a.errG) ? a.errG : 0)) * 90, minFor(a, 'errSh')) : NaN), cat: 'secure', dir: -1 },
+  { k: 'onGD', l: 'Team goal difference while on', f: (a) => (has(a.onG) && has(a.onGA) ? safe((a.onG - a.onGA) * 90, minFor(a, 'onG')) : NaN), cat: 'impact' },
   { k: 'ppm', l: 'Team points per match played', f: (a) => ppmOf(a), cat: 'impact' },
   { k: 'rating', l: 'Average match rating', f: (a) => (a.rtN ? a.rt / a.rtN : NaN), cat: 'impact' },
   { k: 'savePct', l: 'Save %', f: (a) => (a.sota >= 5 ? (100 * a.saves) / a.sota : NaN), cat: 'keep', gk: true },
@@ -77,8 +78,8 @@ function kpPct(sorted, v, dir) {
   const p = (100 * (lo + eq / 2)) / sorted.length;
   return dir === -1 ? 100 - p : p;
 }
-function kpAssess(p, ms, teamMin) {
-  const a = aggPlayer(ms, p.id), peers = kpPeers()[p.group] || {};
+function kpAssess(p, ms, teamMin) { return kpScore(p, aggPlayer(ms, p.id), kpPeers()[p.group] || {}, teamMin); }
+function kpScore(p, a, peers, teamMin, period) {
   const w = a.min / (a.min + KP_SHRINK);
   const metrics = KP_METRICS.filter((mt) => !!mt.gk === (p.group === 'GK') || mt.cat === 'impact' || (p.group === 'GK' && mt.cat === 'pass')).map((mt) => {
     const v = mt.f(a), raw = kpPct(peers[mt.k], v, mt.dir || 1);
@@ -91,19 +92,37 @@ function kpAssess(p, ms, teamMin) {
   Object.entries(wts).forEach(([c, wt]) => { if (has(cats[c])) { sum += cats[c] * wt; sw += wt; } });
   const perf = sw ? sum / sw : NaN;
   const share = teamMin ? Math.min(1, a.min / teamMin) : 0;
-  return { p, a, metrics, cats, perf, share, imp: has(perf) ? perf * (0.4 + 0.6 * share) : NaN };
+  // Over several seasons playing time weighs more: influence over a decade needs the minutes, not one good spell
+  const k = period ? 0.2 + 0.8 * Math.sqrt(share) : 0.4 + 0.6 * share;
+  return { p, a, metrics, cats, perf, share, areas: Object.keys(cats).length, imp: has(perf) ? perf * k : NaN };
 }
 
 function viewKey(el) {
   const T = S.team, ms = scoped(T);
   if (!DB.hasPlayers) return missingNote('Key players', 'Player stats', el);
-  const teamMin = ms.length * 90;
-  const rows = Object.values(DB.players).filter((p) => p.team === T).map((p) => kpAssess(p, ms, teamMin)).filter((r) => r.a.min >= 90 && has(r.perf));
-  el.append(h('div', { class: 'hero' }, h('h1', { text: teamName(T) }), h('div', { class: 'meta' }, h('span', { text: rangeLabel() + ' · ' + ms.length + (ms.length === 1 ? ' match' : ' matches') + ' · key players' }))));
+  const opts = kpPeriodOptions();
+  const nSeasons = opts.some(([v]) => v === S.kpPeriod) ? +S.kpPeriod : 1;
+  let rows, peerN, all, sub, cover = null;
+  const open = (pid) => { if (!DB.players[pid]) return; S.tab = 'players'; S.player = pid; render(); window.scrollTo({ top: 0 }); };
+  if (nSeasons > 1) {
+    const P = kpPeriod(T, nSeasons);
+    rows = P.rows; peerN = P.peerN; all = P.rows; cover = P.seasons;
+    sub = `${P.seasons[P.seasons.length - 1].season} to ${P.seasons[0].season} · ${P.seasons.length} seasons · league matches`;
+  } else {
+    const teamMin = ms.length * 90;
+    rows = Object.values(DB.players).filter((p) => p.team === T).map((p) => kpAssess(p, ms, teamMin)).filter((r) => r.a.min >= 90 && has(r.perf));
+    peerN = Object.values(kpPeers()).reduce((s, g) => Math.max(s, ...Object.values(g).map((xs) => xs.length)), 0);
+    all = Object.values(DB.players).filter((p) => p.team === T).map((p) => ({ p, a: aggPlayer(ms, p.id) })).filter((x) => x.a.min > 0);
+    sub = rangeLabel() + ' · ' + ms.length + (ms.length === 1 ? ' match' : ' matches');
+  }
+  el.append(h('div', { class: 'hero' }, h('h1', { text: teamName(T) }), h('div', { class: 'meta' }, h('span', { text: sub + ' · key players' }))));
+  if (opts.length > 1) el.append(h('div', { class: 'kp-period' }, h('span', { class: 'eyebrow', text: 'Over' }), seg(opts, String(nSeasons), (v) => { S.kpPeriod = v; render(); }, 'Period')));
+  if (cover) {
+    const basic = cover.filter((x) => !x.detail).map((x) => x.season);
+    el.append(h('p', { class: 'note', style: { margin: '-6px 0 14px' }, text: `Totals across ${cover.map((x) => seasonShort(x.season)).join(', ')}, compared with every league player over the same seasons.` + (basic.length ? ` ${basic.join(' and ')} ${basic.length > 1 ? 'have' : 'has'} only minutes, goals, assists, cards and goals conceded, so other stats count the detailed seasons only.` : '') + ' Players are matched by club and name, so a player listed under a different spelling in another season counts as two.' }));
+  }
   if (!rows.length) { el.append(card({ title: 'Key players', span: true }, null, h('p', { class: 'note', style: { marginTop: 0 }, text: 'No player has 90 minutes with enough stats to rate yet.' }))); return; }
   rows.sort((x, y) => y.imp - x.imp);
-  const open = (pid) => { S.tab = 'players'; S.player = pid; render(); window.scrollTo({ top: 0 }); };
-  const peerN = Object.values(kpPeers()).reduce((s, g) => Math.max(s, ...Object.values(g).map((xs) => xs.length)), 0);
 
   // Top five
   el.append(h('div', { class: 'mvp-row' }, rows.slice(0, 5).map((r, i) => {
@@ -114,7 +133,7 @@ function viewKey(el) {
       h('div', { class: 'mvp-name', text: r.p.name }),
       h('div', { class: 'mvp-score' }, h('b', { text: Math.round(r.imp) }), h('span', { text: 'importance' })),
       h('div', { class: 'mvp-bar' }, h('i', { style: { width: Math.round(100 * r.share) + '%' } })),
-      h('div', { class: 'sub', text: `${Math.round(100 * r.share)}% of minutes · performance ${Math.round(r.perf)}` }),
+      h('div', { class: 'sub', text: `${Math.round(100 * r.share)}% of minutes · performance ${Math.round(r.perf)}` + (r.seasons ? ` · ${r.seasons} season${r.seasons > 1 ? 's' : ''}` : '') }),
       h('ul', null, best.map((x) => h('li', { text: `${x.mt.good || x.mt.l}: ${ordinal(Math.round(x.raw))} percentile` }))));
     return tile;
   })));
@@ -132,30 +151,29 @@ function viewKey(el) {
   };
   grid.append(card({ title: 'Squad ranking', span: true }, `Importance = performance × playing time · area scores are percentiles against league players in the same position (50 = average) · click a player for the full profile`,
     h('div', { class: 'tbl-wrap' }, h('table', { class: 'kp-table' },
-      h('thead', null, h('tr', null, h('th', { text: '#' }), h('th', { class: 'l', text: 'Player' }), h('th', { text: 'Pos' }), h('th', { text: 'Min %' }), h('th', { text: 'Importance' }), h('th', { text: 'Performance' }), cats.map(([, l]) => h('th', { text: l })))),
+      h('thead', null, h('tr', null, h('th', { text: '#' }), h('th', { class: 'l', text: 'Player' }), h('th', { text: 'Pos' }), cover ? h('th', { text: 'Seasons' }) : null, h('th', { text: 'Min %' }), h('th', { text: 'Importance' }), h('th', { text: 'Performance' }), cats.map(([, l]) => h('th', { text: l })))),
       h('tbody', null, rows.map((r, i) => h('tr', { onclick: () => open(r.p.id), title: 'Open ' + r.p.name },
-        h('td', { text: i + 1 }), h('td', { class: 'l', text: r.p.name }), h('td', { class: 'sub', text: r.p.role || r.p.group }), h('td', { text: Math.round(100 * r.share) }),
-        h('td', null, h('b', { text: Math.round(r.imp) })), h('td', { text: Math.round(r.perf) }), cats.map(([c]) => cell(r.cats[c]))))))),
-    h('p', { class: 'note', text: `Compared with ${peerN ? 'up to ' + peerN : 'the'} league players per position with ${KP_MIN}+ minutes. Players with few minutes are pulled towards average (50) so a good half-hour does not top the list. Importance multiplies performance by (0.4 + 0.6 × share of the team’s minutes), so regulars count for more.` })));
+        h('td', { text: i + 1 }), h('td', { class: 'l', text: r.p.name }), h('td', { class: 'sub', text: r.p.role || r.p.group }), cover ? h('td', { text: r.seasons }) : null, h('td', { text: Math.round(100 * r.share) }),
+        h('td', null, h('b', { text: Math.round(r.imp) })), h('td', { title: r.areas < 4 ? 'Rated on goals and results only (seasons before detailed stats)' : null, text: Math.round(r.perf) + (r.areas < 4 ? ' *' : '') }), cats.map(([c]) => cell(r.cats[c]))))))),
+    h('p', { class: 'note', text: `Compared with ${peerN ? 'up to ' + peerN : 'the'} league players per position with ${cover ? KP_MIN_PERIOD : KP_MIN}+ minutes. Players with few minutes are pulled towards average (50) so a good half-hour does not top the list. Importance multiplies performance by ${cover ? '(0.2 + 0.8 × √share of the team’s minutes over the period), so long-serving regulars count for more' : '(0.4 + 0.6 × share of the team’s minutes), so regulars count for more'}.` + (rows.some((r) => r.areas < 4) ? ' * Rated on goals, discipline and team results only: those seasons have no detailed stats.' : '') })));
 
   // Leaderboards: what the user asked for, as totals and per 90
   const hasTklW = rows.some((r) => has(r.a.tklW));
   const boards = KP_METRICS.filter((mt) => mt.tot && !mt.gk && mt.dir !== -1 && !(mt.k === 'tkl' && hasTklW) && rows.some((r) => has(r.a[mt.tot]) && r.a[mt.tot] > 0));
   const order = ['g', 'ast', 'tklW', 'tkl', 'pc', 'duelW', 'aerW', 'key', 'bcc', 'int', 'rec', 'xg', 'xa', 'sot', 'clr', 'blk', 'drbW', 'prog', 'f3p', 'lbW'];
   boards.sort((x, y) => order.indexOf(x.k) - order.indexOf(y.k));
-  const all = Object.values(DB.players).filter((p) => p.team === T).map((p) => ({ p, a: aggPlayer(ms, p.id) })).filter((x) => x.a.min > 0);
-  grid.append(card({ title: 'Squad leaders', span: true }, rangeLabel() + ' · totals, with per 90 minutes in brackets', h('div', { class: 'grid three' }, boards.map((mt) => {
+  grid.append(card({ title: 'Squad leaders', span: true }, (cover ? sub : rangeLabel()) + ' · totals, with per 90 minutes in brackets', h('div', { class: 'grid three' }, boards.map((mt) => {
     const top = all.filter((x) => has(x.a[mt.tot]) && x.a[mt.tot] > 0).sort((x, y) => y.a[mt.tot] - x.a[mt.tot]).slice(0, 3);
     const dp = mt.d || 0;
     return h('div', null, h('div', { class: 'eyebrow', text: mt.l }), h('ol', { class: 'kp-list' }, top.map((x) => h('li', null,
       h('a', { href: '#players', onclick: (e) => { e.preventDefault(); open(x.p.id); }, text: x.p.name }),
-      h('span', { class: 'sub', text: ` ${x.a[mt.tot].toFixed(dp)} (${safe(x.a[mt.tot] * 90, x.a.min).toFixed(2)})` })))));
+      h('span', { class: 'sub', text: ` ${x.a[mt.tot].toFixed(dp)} (${safe(x.a[mt.tot] * 90, minFor(x.a, mt.tot)).toFixed(2)})` })))));
   }))));
 
-  improvement(grid, T, ms);
+  if (!cover) improvement(grid, T, ms);
 
   // Results with and without (starts from line-ups)
-  if (DB.hasLineups && ms.length >= 4) {
+  if (!cover && DB.hasLineups && ms.length >= 4) {
     const pts = (m) => { const f = goalsFor(m, T), g = goalsAg(m, T); return f > g ? 3 : f === g ? 1 : 0; };
     const rw = rows.map((r) => {
       const st = ms.filter((m) => (m.lineups[T] || []).some((l) => l.pid === r.p.id)), not = ms.filter((m) => !st.includes(m));
@@ -173,6 +191,62 @@ function viewKey(el) {
     h('ul', null, used.map((u) => h('li', { text: u }))),
     h('p', null, 'Performance weights the areas by position: defenders mostly on defending and duels, midfielders on passing, creating and defending, forwards on goals and creating, goalkeepers on saves and goals conceded. Team impact (goal difference while on, points per match, match rating) counts for every position.'),
     h('p', null, 'What it cannot see: off-the-ball work, positioning, pressing without a tackle, and the quality of chances (no player xG in this data). Treat it as a summary of the numbers, not a verdict.'))));
+}
+
+/* ---------- Several seasons ---------- */
+const KP_MIN_PERIOD = 600;
+// Seasons with player stats, newest first, from the season on screen back
+function kpPlayerSeasons() {
+  return allSeasons().filter((x) => x.season <= (DB.season || '9999')).filter((x) => (x.current ? x.db.hasPlayers : x.entry.layers.length || x.entry.summary));
+}
+function kpPeriodOptions() {
+  if (!DB.season || !(DB === SEASONS.real || DB.pastSeason)) return [];
+  const n = kpPlayerSeasons().length;
+  if (n < 2) return [];
+  const o = [['1', 'This season']];
+  [3, 5, 8, 10].forEach((k) => { if (k < n) o.push([String(k), k + ' seasons']); });
+  o.push([String(n), (n > 10 ? 'All ' : '') + n + ' seasons' + (n > 10 ? '' : ' (all)')]);
+  return o.filter((x, i, a) => a.findIndex((y) => y[0] === x[0]) === i);
+}
+// Every league player's totals summed over n seasons, keyed by club + name
+function kpPeriod(T, n) {
+  const seasons = kpPlayerSeasons().slice(0, n);
+  return memo('kpPeriod|' + seasons.map((x) => x.season).join(',') + '|' + fbTeamKey(teamName(T)), () => {
+    const players = {}, teamMin = {};
+    const keep = aggPlayer.season;
+    const cover = seasons.map((x) => {
+      const db = x.current ? x.db : seasonDB(x.season);
+      aggPlayer.season = db.seasonPS || null;
+      const tk = (id) => fbTeamKey(db.teamById[id] ? db.teamById[id].name : id);
+      db.matches.forEach((m) => [m.home, m.away].forEach((id) => (teamMin[tk(id)] = (teamMin[tk(id)] || 0) + 90)));
+      let detail = false;
+      Object.values(db.players).forEach((p) => {
+        const a = aggPlayer(db.matches, p.id);
+        if (!(a.min > 0) || !db.teamById[p.team]) return;
+        if (has(a.pa)) detail = true;
+        const pre = 'pl-' + p.team + '-', key = tk(p.team) + '|' + (p.id.startsWith(pre) ? p.id.slice(pre.length) : playerKey('', p.name).slice(4));
+        const m = (players[key] = players[key] || { p: { id: p.id, name: p.name, group: p.group, role: p.role, team: tk(p.team) }, a: { n: 0, min: 0, st: 0, _min: {} }, seasons: 0 });
+        m.seasons++;
+        Object.entries(a).forEach(([k, v]) => {
+          if (k === 'ppm' || typeof v !== 'number' || !has(v)) return; // ppm is a rate; the rest are totals
+          m.a[k] = (k in m.a ? m.a[k] : 0) + v;
+          if (k !== 'n' && k !== 'min' && k !== 'st') m.a._min[k] = (m.a._min[k] || 0) + a.min;
+        });
+      });
+      return { season: x.season, detail };
+    });
+    aggPlayer.season = keep;
+    const peers = { GK: {}, DEF: {}, MID: {}, FWD: {} };
+    Object.values(players).forEach((x) => {
+      if (!(x.a.min >= KP_MIN_PERIOD) || !peers[x.p.group]) return;
+      KP_METRICS.forEach((mt) => { const v = mt.f(x.a); if (has(v)) (peers[x.p.group][mt.k] = peers[x.p.group][mt.k] || []).push(v); });
+    });
+    Object.values(peers).forEach((g) => Object.values(g).forEach((xs) => xs.sort((a, b) => a - b)));
+    const tkT = fbTeamKey(teamName(T)), tMin = teamMin[tkT] || 1;
+    const rows = Object.values(players).filter((x) => x.p.team === tkT && x.a.min >= 270).map((x) => ({ ...kpScore(x.p, x.a, peers[x.p.group] || {}, tMin, true), seasons: x.seasons })).filter((r) => has(r.perf));
+    const peerN = Object.values(peers).reduce((s, g) => Math.max(s, ...Object.values(g).map((xs) => xs.length)), 0);
+    return { rows, peerN, seasons: cover };
+  });
 }
 
 /* ---------- Season improvement ---------- */

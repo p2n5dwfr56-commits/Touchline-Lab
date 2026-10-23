@@ -8,7 +8,7 @@ const S = {
   tab: 'overview', team: 'ABE', venue: 'all', range: 'season', cmp: 'CEL',
   heat: 'all', shots: 'for', group: 'all', per90: true, sort: 'min', player: null,
   cmpMode: 'teams', pA: null, pB: null, match: null, act: 'pass', form: null, shape: 'plan',
-  opp: null, oppSort: 'next', oppScope: 'league', comp: 'all', loss: null, lossShow: 'shot', bwSort: 'wins', impMetric: 'rating', impPlayer: null, raceN: '5',
+  opp: null, oppSort: 'next', oppScope: 'league', comp: 'all', loss: null, lossShow: 'shot', bwSort: 'wins', impMetric: 'rating', impPlayer: null, raceN: '5', kpPeriod: '1',
 };
 const TABS = [['overview', 'Overview'], ['team', 'Team analysis'], ['press', 'Without the ball'], ['tactics', 'Tactics'], ['players', 'Players'], ['key', 'Key players'], ['compare', 'Compare'], ['opponents', 'Opponents'], ['seasons', 'Seasons'], ['matches', 'Matches'], ['data', 'Data']];
 
@@ -542,7 +542,7 @@ function viewOverview(el) {
   ].filter(([, f]) => pls.some((x) => has(f(x.a)))).slice(0, 4).forEach(([l, f, t]) => {
     leaders.append(h('div', null, h('div', { class: 'eyebrow', text: l }), h('ol', { style: { margin: '6px 0 0', paddingLeft: '18px' } }, top(l, f).map((x) => h('li', null, h('a', { href: '#players', onclick: (e) => { e.preventDefault(); S.tab = 'players'; S.player = x.p.id; render(); }, style: { color: 'var(--ink)' }, text: x.p.name }), h('div', { class: 'sub', text: t(x.a) }))))));
   });
-  if (pls.length) grid.append(card({ title: 'Squad leaders', span: false }, DB.seasonPS ? 'Season totals from FBref' : rangeLabel(), leaders));
+  if (pls.length) grid.append(card({ title: 'Squad leaders', span: false }, DB.seasonPS ? 'Season totals from ' + (DB.seasonSrc ? 'Sportmonks' : 'FBref') : rangeLabel(), leaders));
 
   // Upcoming fixtures (from FBref's Scores & Fixtures table)
   const today = new Date().toISOString().slice(0, 10);
@@ -832,7 +832,7 @@ function playerProfile(pid, ms) {
     : [[a.min, 'Minutes', 0], [a.st, 'Starts', 0], [a.g, 'Goals', 0], [a.xg, 'xG', 1], [a.sh, 'Shots', 0], [a.ast, 'Assists', 0], [a.xa, 'xA', 1], [a.rtN ? a.rt / a.rtN : NaN, 'Avg rating', 2], [100 * safe(a.pc, a.pa), 'Pass completion', 0, '%'], [a.tkl + a.int, 'Tackles + int', 0],
       [has(a.onG) && has(a.onGA) ? a.onG - a.onGA : NaN, 'On-pitch +/−', 0, '', true], [ppmOf(a), 'Team pts / match', 2]];
   const stats = h('div', { class: 'statline' }, items.filter(([v]) => has(v)).map(([v, l, d, u, sg]) => h('div', null, h('b', { text: (sg ? signed(v, d) : fmt(v, d)) + (u || '') }), h('span', { text: l }))));
-  const span = DB.seasonPS && DB.seasonPS[pid] && !perMatchPids().has(pid) ? 'Season totals from FBref' : rangeLabel();
+  const span = DB.seasonPS && DB.seasonPS[pid] && !perMatchPids().has(pid) ? 'Season totals from ' + (DB.seasonSrc ? 'Sportmonks' : 'FBref') : rangeLabel();
   if (!DB.hasEvents) {
     return card({ title: 'Player profile', span: true }, span, head, stats,
       h('div', { class: 'grid' }, h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '6px' }, text: 'Percentile vs league ' + GROUP_NAME[p.group].toLowerCase() + 's · per 90' }), pctBars([pid], [A])),
@@ -1127,7 +1127,10 @@ function addSportmonks(files, statusEl, opts = {}) {
   }
   cache.clear();
   if (opts.restore) return true;
-  if (!opts.nosave) saveLayers(files.map((f) => ({ name: f.name, text: f.text })));
+  if (!opts.nosave) {
+    if (DB.pastSeason) { const k = DB.season; Promise.all(files.map((f) => pastAddLayer(k, { name: f.name, text: f.text }))).then(refreshSeasons); } // goes with that past season
+    else saveLayers(files.map((f) => ({ name: f.name, text: f.text })));
+  }
   S.player = null; S.form = null; S.tab = 'players'; S.sort = 'min';
   render();
   flash(`Added Sportmonks data for ${last.matched} of ${last.finished} matches: line-ups, formations, goals, assists, cards, substitutions and player match stats for every club` +
