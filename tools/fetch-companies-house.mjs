@@ -298,6 +298,13 @@ async function main() {
       const m = others[Math.floor(others.length / 2)], dist = (v) => Math.abs(Math.log((Math.abs(v) || 1) / m));
       y[k] = dist(a) <= dist(b) ? a : b;
     }));
+    // A figure far below the club's usual level is a truncated scan ("9,808" for 9,808,xxx): left out
+    ['turnover', 'staff', 'netAssets'].forEach((k) => {
+      const vals = Object.values(years).map((z) => z[k]).filter((v) => v != null && v > 0).sort((p, q) => p - q);
+      if (vals.length < 3) return;
+      const m = vals[Math.floor(vals.length / 2)];
+      Object.values(years).forEach((y) => { if (y[k] != null && y[k] > 0 && m > 1e6 && y[k] < m / 50) { (y.dropped = y.dropped || {})[k] = y[k]; y[k] = null; } });
+    });
     // Rounded figures from the report text must sit in line with the club's other years
     const tv = Object.values(years).filter((y) => y.turnover != null && !(y.approx || []).includes('turnover')).map((y) => y.turnover).sort((a, b) => a - b);
     const med = tv.length ? tv[Math.floor(tv.length / 2)] : null;
