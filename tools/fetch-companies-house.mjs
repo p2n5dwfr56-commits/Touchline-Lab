@@ -36,7 +36,7 @@ mkdirSync(CACHE, { recursive: true });
 const CLUBS = [
   ['Aberdeen', 'SC005364'], ['Celtic', 'SC003487'], ['Rangers', 'SC437060'], ['Hearts', 'SC005863'], ['Hibernian', 'SC005323'],
   ['Motherwell', 'SC005702'], ['Dundee United', 'SC013690'], ['Dundee', 'SC004585'], ['Kilmarnock', 'SC006219'], ['St Mirren', 'SC005773'],
-  ['Falkirk', 'SC005854'], ['St Johnstone', 'SC007629'], ['Livingston', 'SC142420'], ['Ross County', 'SC033275'],
+  ['Falkirk', 'SC005854'], ['St Johnstone', 'SC007629']
 ];
 const only = opt('club');
 
@@ -68,6 +68,9 @@ function htmlText(x) {
       return rows.sort((a, b) => a.top - b.top).map((r) => r.items.sort((a, b) => a.left - b.left).map((b) => b.t).join('  ')).join('\n');
     }).join('\n\f\n');
   }
+  // Table rows become one line each (cells often hold their own paragraphs)
+  const cellText = (c) => c.replace(/<[^>]+>/g, ' ').replace(/&nbsp;|&#160;/g, ' ').replace(/&amp;/g, '&').replace(/&pound;|&#163;/g, '£').replace(/&#\d+;|&[a-z]+;/g, ' ').replace(/\s+/g, ' ').replace(/\(\s+/g, '(').replace(/\s+\)/g, ')').trim();
+  x = x.replace(/<tr\b[\s\S]*?<\/tr>/gi, (tr) => '<p>' + (tr.match(/<t[dh]\b[\s\S]*?<\/t[dh]>/gi) || []).map(cellText).filter(Boolean).join('  ') + '</p>');
   return x.replace(/<head[\s\S]*?<\/head>/i, '').replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
     .replace(/<\/(p|div|tr|li|h\d)>|<br\s*\/?>/gi, '\n').replace(/<\/t[dh]>/gi, '  ').replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;|&#160;/g, ' ').replace(/&amp;/g, '&').replace(/&pound;|&#163;/g, '£').replace(/&#8217;|&rsquo;/g, '’').replace(/&#\d+;|&[a-z]+;/g, ' ')
@@ -231,7 +234,8 @@ function parseFiling(text, meta) {
   const year = (k) => (f[k] ? f[k].cur * scale : null), prev = (k) => (f[k] && f[k].prev != null ? f[k].prev * scale : null);
   const make = (get, sp) => {
     const abs = (v) => (v == null ? v : Math.abs(v)); // costs shown in brackets in the statement are still costs
-    const y = { turnover: get('turnover'), staff: abs(get('staff') ?? get('wages')), playerSales: get('playerSales'), amort: abs(get('amort')), opResult: get('opResult'), preTax: get('preTax'), result: get('result'), cash: get('cash'), netAssets: get('netAssets') };
+    const y0 = get('cash');
+    const y = { turnover: get('turnover'), staff: abs(get('staff') ?? get('wages')), playerSales: get('playerSales'), amort: abs(get('amort')), opResult: get('opResult'), preTax: get('preTax'), result: get('result'), cash: y0 != null && y0 < 0 ? null : y0, netAssets: get('netAssets') }; // a bracketed cash line is an overdraft
     // Results are losses when the line says loss and the number is shown without brackets
     const split2 = Object.fromEntries(Object.entries(split).map(([k, v]) => [k, (sp === 'cur' ? v.cur : v.prev) != null ? (sp === 'cur' ? v.cur : v.prev) * scale : null]).filter(([, v]) => v != null));
     if (Object.keys(split2).length) y.split = split2;
@@ -244,11 +248,8 @@ function parseFiling(text, meta) {
   const words = (re) => { const m = flat.match(re); return m ? Math.round(parseFloat(m[m.length - 2]) * 1e6) : null; };
   if (cur.turnover == null) {
     const v = words(/\b(?:revenue|turnover)\b(?:(?!increased|decreased|rose|fell|grew|by £)[^.£]){0,70}?\b(?:of|totalled|totaled|was|amounted to|reached)\s+£\s?(\d{1,3}(?:\.\d{1,3})?)\s?(m\b|million)/i);
-    if (v) { cur.turnover = v; (cur.approx = cur.approx || []).push('turnover'); }
-  }
-  if (cur.preTax == null) {
-    const m = flat.match(/\b(loss|profit) (?:on ordinary activities )?before tax(?:ation)?\s+(?:of|was|amounted to)\s+£\s?(\d{1,3}(?:\.\d{1,3})?)\s?(m\b|million)/i);
-    if (m) { cur.preTax = Math.round(parseFloat(m[2]) * 1e6) * (/loss/i.test(m[1]) ? -1 : 1); (cur.approx = cur.approx || []).push('preTax'); }
+    const v2 = v || words(/\b(?:revenue|turnover)\b[^.£]{0,40}?\b(?:increased|decreased|rose|fell|grew)\b[^.£]{0,60}?\bto\s+£\s?(\d{1,3}(?:\.\d{1,3})?)\s?(m\b|million)/i);
+    if (v2) { cur.turnover = v2; (cur.approx = cur.approx || []).push('turnover'); }
   }
   // Check: preTax and result should be close; turnover should exceed staff costs' plausibility floor
   const checks = [];
@@ -284,6 +285,7 @@ async function main() {
       if (later) Object.entries(later).forEach(([k, v]) => {
         if (['yearEnd', 'source', 'checks', 'fromLater', 'plFound', 'unit', 'split'].includes(k) || v == null) return;
         if (own[k] == null) { own[k] = v; (own.filled = own.filled || []).push(k); return; }
+        if ((own.approx || []).includes(k) && !(later.approx || []).includes(k)) { own[k] = v; own.approx = own.approx.filter((x) => x !== k); return; } // an exact figure beats a rounded one
         // Two readings of the same figure: when they disagree, the one with more digits is usually right
         // (OCR drops digits more often than it adds them); the disagreement is kept for checking
         if (typeof v === 'number' && own[k] !== v) {
@@ -320,7 +322,7 @@ async function main() {
       if ((y.approx || []).includes('turnover') && (y.turnover < 1e6 || (med && (y.turnover < med * 0.4 || y.turnover > med * 2.5)))) { y.turnover = null; y.approx = y.approx.filter((k) => k !== 'turnover'); }
       if ((y.approx || []).includes('preTax') && med && Math.abs(y.preTax) > med * 1.5) { y.preTax = null; y.approx = y.approx.filter((k) => k !== 'preTax'); }
     });
-    out.push({ club, company: number, url: `https://find-and-update.company-information.service.gov.uk/company/${number}/filing-history`, years: Object.values(years).sort((a, b) => b.yearEnd.localeCompare(a.yearEnd)) });
+    out.push({ club, company: number, url: `https://find-and-update.company-information.service.gov.uk/company/${number}/filing-history`, years: Object.values(years).filter((y) => ['turnover', 'staff', 'preTax', 'cash', 'netAssets'].some((k) => y[k] != null)).sort((a, b) => b.yearEnd.localeCompare(a.yearEnd)) });
   }
   writeFileSync(OUT, JSON.stringify({ source: 'touchline-finance', from: 'Companies House annual accounts (Crown copyright, Open Government Licence)', fetched: new Date().toISOString(), clubs: out }, null, 1));
   console.log(`\nWrote ${OUT}: ${out.length} clubs.`);

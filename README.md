@@ -261,3 +261,17 @@ for past seasons, from `--list-seasons`). Dropped in the Data tab, the file adds
 the loaded season as a cup match with line-ups, formations, events, team and player stats (group stage and
 knockout; penalty shootouts are read from the scores). A Wikipedia result for the same tie gives way and
 keeps its attendance and referee. Competition is set to All competitions after the import.
+
+## Finances from Companies House
+`COMPANIES_HOUSE_KEY=… node tools/fetch-companies-house.mjs` downloads each Premiership club's annual
+accounts (10 years by default) through the Companies House API (a free REST API key from a live
+application at developer.company-information.service.gov.uk; never stored). Machine-readable filings are
+read as text (positioned boxes and table rows put back into lines); scanned PDFs go through OCR
+(`pdftoppm` + `tesseract`, one thread per page, four pages at a time). From each statement it reads
+turnover and its split, staff costs, player sales, operating and pre-tax results, cash and net assets.
+Each year is read twice where possible (its own accounts and the next year's comparatives): gaps are
+filled, tenfold or thousandfold misreads are settled against the club's other years, and remaining
+disagreements are kept and marked † in the Finances tab. Downloads and text are cached in
+`data/ch-cache/` (not committed); `--parse-only` re-reads the cache, `--retext` rebuilds the text of
+machine-readable filings. Dundee and Falkirk (and St Johnstone before 2023) file small-company accounts
+without a profit and loss account, so only balance-sheet figures exist for those years.

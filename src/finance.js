@@ -43,7 +43,10 @@ function viewFinance(el) {
   el.append(grid);
 
   if (C && ys.length) {
-    const last = ys[ys.length - 1], prev = ys[ys.length - 2];
+    // Headline tiles: the latest year with a full profit and loss account (a newer year may hold only a rounded turnover)
+    const fullYs = ys.filter((y) => y.turnover != null && y.preTax != null);
+    const li = fullYs.length ? ys.indexOf(fullYs[fullYs.length - 1]) : ys.length - 1;
+    const last = ys[li], prev = ys[li - 1];
     const noPL = last.turnover == null;
     const tiles = [
       ['Turnover', last.turnover, prev && prev.turnover], ['Staff costs', last.staff, prev && prev.staff], ['Wages / turnover', ratio(last), prev ? ratio(prev) : NaN, '%'],
@@ -134,7 +137,8 @@ function finBars(box, ys, measures) {
 function leagueFinance(grid, key) {
   const P = seasonPositions();
   const rows = Object.entries(FIN).map(([k, c]) => {
-    const ys = finYears(c), plYs = ys.filter((y) => y.turnover != null), y = plYs[plYs.length - 1] || ys[ys.length - 1];
+    const ys = finYears(c), full = ys.filter((y) => y.turnover != null && y.preTax != null), plYs = ys.filter((y) => y.turnover != null);
+    const y = full[full.length - 1] || plYs[plYs.length - 1] || ys[ys.length - 1]; // the latest year with a full profit and loss account
     if (!y) return null;
     const s = finSeason(y.yearEnd), lg = P[s] && P[s][k];
     return { k, c, y, s, lg };
@@ -154,24 +158,32 @@ function leagueFinance(grid, key) {
     const c = card({ title: 'Wages and points', span: true }, 'Staff costs against league points in the season each financial year covers · the line is the trend across clubs');
     const W = 900, H = 300, m = { l: 56, r: 16, t: 14, b: 36 };
     const xs = pts.map((r) => r.y.staff), ys = pts.map((r) => r.lg.pts);
-    const x0 = 0, x1 = Math.max(...xs) * 1.08, y0 = 0, y1 = Math.max(...ys) * 1.1;
-    const X = (v) => m.l + ((v - x0) * (W - m.l - m.r)) / (x1 - x0), Y = (v) => H - m.b - ((v - y0) * (H - m.t - m.b)) / (y1 - y0);
+    // Staff costs on a log scale: the clubs on £4–20m spread out instead of crowding one corner
+    const lx = (v) => Math.log10(v), x0 = lx(Math.min(...xs) * 0.8), x1 = lx(Math.max(...xs) * 1.15), y0 = 0, y1 = Math.max(...ys) * 1.1;
+    const X = (v) => m.l + ((lx(v) - x0) * (W - m.l - m.r)) / (x1 - x0), Y = (v) => H - m.b - ((v - y0) * (H - m.t - m.b)) / (y1 - y0);
     const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img', 'aria-label': 'Staff costs against league points' });
     const ax = sv('g', { class: 'axis' });
-    [0.25, 0.5, 0.75, 1].forEach((f) => { const v = x1 * f; ax.append(sv('text', { x: X(v), y: H - 12, 'text-anchor': 'middle', text: money(v, 0) })); ax.append(sv('line', { x1: X(v), x2: X(v), y1: m.t, y2: H - m.b, class: 'grid-line' })); });
+    [2e6, 3e6, 5e6, 1e7, 2e7, 4e7, 8e7, 1.6e8].filter((v) => lx(v) >= x0 && lx(v) <= x1).forEach((v) => { ax.append(sv('text', { x: X(v), y: H - 12, 'text-anchor': 'middle', text: money(v, 0) })); ax.append(sv('line', { x1: X(v), x2: X(v), y1: m.t, y2: H - m.b, class: 'grid-line' })); });
     [0, 20, 40, 60, 80, 100].filter((v) => v <= y1).forEach((v) => { ax.append(sv('line', { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), class: v === 0 ? 'baseline' : 'grid-line' })); ax.append(sv('text', { x: m.l - 6, y: Y(v) + 4, 'text-anchor': 'end', text: v })); });
-    ax.append(sv('text', { x: W - m.r, y: H - 24, 'text-anchor': 'end', text: 'Staff costs →' }));
+    ax.append(sv('text', { x: W - m.r, y: H - 24, 'text-anchor': 'end', text: 'Staff costs (log scale) →' }));
     ax.append(sv('text', { x: m.l + 4, y: m.t + 10, text: 'League points' }));
     svg.append(ax);
-    // Least-squares trend
-    const n = pts.length, mxv = xs.reduce((a, b) => a + b, 0) / n, myv = ys.reduce((a, b) => a + b, 0) / n;
-    const sl = xs.reduce((t, x, i) => t + (x - mxv) * (ys[i] - myv), 0) / (xs.reduce((t, x) => t + (x - mxv) ** 2, 0) || 1);
-    svg.append(sv('line', { x1: X(0), y1: Y(myv - sl * mxv), x2: X(x1), y2: Y(myv + sl * (x1 - mxv)), stroke: css('--muted'), 'stroke-dasharray': '5 4', 'stroke-width': 1.5 }));
-    pts.forEach((r) => {
+    // Trend: points against the log of staff costs
+    const n = pts.length, lxs = xs.map(lx), mxv = lxs.reduce((a, b) => a + b, 0) / n, myv = ys.reduce((a, b) => a + b, 0) / n;
+    const sl = lxs.reduce((t, x, i) => t + (x - mxv) * (ys[i] - myv), 0) / (lxs.reduce((t, x) => t + (x - mxv) ** 2, 0) || 1);
+    const yAt = (l) => myv + sl * (l - mxv);
+    svg.append(sv('line', { x1: X(10 ** x0), y1: Y(yAt(x0)), x2: X(10 ** x1), y2: Y(yAt(x1)), stroke: css('--muted'), 'stroke-dasharray': '5 4', 'stroke-width': 1.5 }));
+    // Labels nudged apart where clubs sit close together
+    const placed = [];
+    pts.slice().sort((a, b) => b.lg.pts - a.lg.pts).forEach((r) => {
       const mine = r.k === key, cx = X(r.y.staff), cy = Y(r.lg.pts);
       const dot = sv('circle', { cx, cy, r: mine ? 7 : 5, fill: mine ? css('--team-a') : css('--c1'), stroke: css('--surface'), 'stroke-width': 1.5, tabindex: 0 });
       hover(dot, () => [{ v: r.c.club + ' · ' + r.s, strong: true }, { v: `${money(r.y.staff)} staff costs · ${r.lg.pts} pts · ${ordinal(r.lg.pos)}` }, { v: `${money(r.y.staff / r.lg.pts)} per point` }]);
-      svg.append(dot, sv('text', { x: cx + 9, y: cy + 4, class: 'bar-val', text: r.c.club }));
+      let ly = cy + 4;
+      const w = r.c.club.length * 7;
+      while (placed.some((q) => Math.abs(q.y - ly) < 13 && cx + 9 < q.x + q.w && cx + 9 + w > q.x)) ly += 13;
+      placed.push({ x: cx + 9, y: ly, w });
+      svg.append(dot, sv('text', { x: cx + 9, y: ly, class: 'bar-val', text: r.c.club }));
     });
     c.append(svg, h('p', { class: 'note', text: 'Clubs above the line got more points than their wage bill suggests; clubs below got fewer.' }));
     grid.append(c);
