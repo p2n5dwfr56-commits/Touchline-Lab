@@ -39,7 +39,10 @@ const CLUBS = [
   ['Falkirk', 'SC005854'], ['St Johnstone', 'SC007629']
 ];
 // Scottish Championship clubs (2026/27), set with --league championship
-const CHAMPIONSHIP = [];
+const CHAMPIONSHIP = [
+  ['Ayr United', 'SC005950'], ['Partick Thistle', 'SC005417'], ['Raith Rovers', 'SC026287'], ['Dunfermline', 'SC011580'],
+  ['Morton', 'SC003264'], ['Ross County', 'SC171034'], ['Livingston', 'SC142420'],
+];
 const LEAGUE = /champ/i.test(opt('league', '')) ? 'Championship' : 'Premiership';
 const only = opt('club');
 
