@@ -153,7 +153,26 @@ function viewSeasons(el) {
     const notes = f && f.notes ? f.notes : w && w.europe ? '' : '';
     return [x.season, { pos: x.r.pos, pts: x.r.a.pts, mp: x.r.a.n, w: x.r.a.w, d: x.r.a.d, l: x.r.a.l, scorer: scorerOf(x) === '–' ? '' : scorerOf(x), notes, title: x.r.pos === 1 }];
   });
-  if (fin.length >= 3) grid.append(card({ title: 'League finishes', span: true }, `${teamName(S.team)}’s final league position, ${fin[0][0]} to ${fin[fin.length - 1][0]}`, positionChart(fin)));
+  if (fin.length >= 3) {
+    // Other clubs' finishes from every season with a full league table (football-data files: 1994/95 on)
+    const P = seasonPositions();
+    const clubs = {};
+    Object.values(P).forEach((t) => Object.entries(t).forEach(([tk, r]) => { if (tk !== key) (clubs[tk] = clubs[tk] || { name: r.name, n: 0 }).n++; }));
+    const PAL = ['--c1', '--c3', '--c4', '--c5'].map(css);
+    S.finPick = (S.finPick || []).filter((tk) => clubs[tk]);
+    const first = Object.keys(P).sort()[0];
+    // Comparing zooms to the seasons other clubs have; the full span stays one click away
+    const toggle = (tk) => { const i = S.finPick.indexOf(tk); if (i >= 0) S.finPick.splice(i, 1); else { if (!S.finPick.length && !S.finSpan) S.finSpan = 'recent'; S.finPick.push(tk); if (S.finPick.length > PAL.length) S.finPick.shift(); } const y = window.scrollY; render(); window.scrollTo(0, y); };
+    const span = first && fin[0][0] < first ? S.finSpan || 'all' : 'all';
+    const shown = span === 'recent' ? fin.filter(([k]) => k >= first) : fin;
+    const tools = first && fin[0][0] < first ? seg([['all', 'Since ' + fin[0][0].slice(0, 4)], ['recent', 'Since ' + first]], span, (v) => { S.finSpan = v; const y = window.scrollY; render(); window.scrollTo(0, y); }, 'Seasons shown') : null;
+    const extras = S.finPick.map((tk, i) => ({ name: clubs[tk].name, color: PAL[i % PAL.length], at: Object.fromEntries(Object.entries(P).filter(([, t]) => t[tk]).map(([season, t]) => [season, t[tk]])) }));
+    const chips = Object.keys(clubs).length ? h('div', { class: 'ask-chips', style: { margin: '0 0 10px' } }, Object.entries(clubs).sort((a, b) => b[1].n - a[1].n || a[1].name.localeCompare(b[1].name)).map(([tk, c]) => {
+      const i = S.finPick.indexOf(tk), col = i >= 0 ? PAL[i % PAL.length] : null;
+      return h('button', { type: 'button', class: 'ask-chip att-chip', 'aria-pressed': String(i >= 0), title: `${c.n} top-flight seasons since ${Object.keys(P).sort()[0]}`, onclick: () => toggle(tk) }, h('i', { style: { background: col || 'transparent', borderColor: col || 'var(--rule-2)' } }), c.name);
+    })) : null;
+    grid.append(card({ title: 'League finishes', span: true, tools }, `${teamName(S.team)}’s final league position, ${shown[0][0]} to ${shown[shown.length - 1][0]}${chips ? ` · click clubs to compare (up to ${PAL.length}; their positions from ${first})` : ''}`, chips, positionChart(shown, extras)));
+  }
   if (H) {
     const eu = Object.keys(H.summary).concat(Object.keys(H.europe)).filter((k, i, arr) => arr.indexOf(k) === i && ((H.summary[k] && H.summary[k].europe) || H.europe[k])).sort().reverse();
     if (eu.length) grid.append(card({ title: 'In Europe', span: true }, `${teamName(S.team)}’s European campaigns · from FBref (match records only where FBref has them)`, h('div', { class: 'tbl-wrap' }, h('table', null,
@@ -279,9 +298,21 @@ function attendanceCard(grid, key) {
 }
 
 // Final league position by season, 1st at the top
-function positionChart(fin) {
+// Every club's final position in each season with a league table, keyed by club
+function seasonPositions() {
+  return memo('seasonPos|' + allSeasons().length + '|' + (SEASONS.real ? SEASONS.real.matches.length : 0), () => {
+    const out = {};
+    allSeasons().forEach((x) => {
+      const db = x.db || seasonDB(x.season);
+      if (!db || !db.matches.length) return;
+      out[x.season] = Object.fromEntries(leagueTable(db, null).map((r) => [fbTeamKey(r.team.name), { name: r.team.name, pos: r.pos, pts: r.a.pts, mp: r.a.n, w: r.a.w, d: r.a.d, l: r.a.l }]));
+    });
+    return out;
+  });
+}
+function positionChart(fin, extras = []) {
   const n = fin.length, W = 1000, Hh = 220, m = { l: 34, r: 12, t: 14, b: 30 };
-  const maxP = Math.max(12, ...fin.map(([, f]) => f.pos));
+  const maxP = Math.max(12, ...fin.map(([, f]) => f.pos), ...extras.flatMap((e) => Object.values(e.at).map((r) => r.pos)));
   const X = (i) => m.l + (n <= 1 ? (W - m.l - m.r) / 2 : (i * (W - m.l - m.r)) / (n - 1)), Y = (p) => m.t + ((p - 1) * (Hh - m.t - m.b)) / (maxP - 1);
   const svg = sv('svg', { viewBox: `0 0 ${W} ${Hh}`, width: '100%', role: 'img', 'aria-label': 'League position by season' });
   const ax = sv('g', { class: 'axis' });
@@ -291,6 +322,17 @@ function positionChart(fin) {
   svg.append(ax);
   const A = css('--team-a');
   const yr = (k) => parseInt(k, 10); // break the line over missing seasons (the wars)
+  // Compared clubs, drawn under the team's own line
+  const idx = Object.fromEntries(fin.map(([k], i) => [k, i]));
+  extras.forEach((e) => {
+    const pts = Object.entries(e.at).filter(([k]) => k in idx).sort((a, b) => a[0].localeCompare(b[0]));
+    svg.append(sv('path', { d: pts.map(([k, r], j) => (j && idx[k] - idx[pts[j - 1][0]] === 1 ? 'L' : 'M') + X(idx[k]).toFixed(1) + ' ' + Y(r.pos).toFixed(1)).join(''), fill: 'none', stroke: e.color, 'stroke-width': 2, 'stroke-linejoin': 'round', opacity: 0.9 }));
+    pts.forEach(([k, r]) => {
+      const dot = sv('circle', { cx: X(idx[k]), cy: Y(r.pos), r: r.pos === 1 ? 5 : 3, fill: r.pos === 1 ? css('--warn') : e.color, stroke: css('--surface'), 'stroke-width': 1, tabindex: 0 });
+      hover(dot, () => [{ v: `${e.name} · ${k} · ${ordinal(r.pos)}`, strong: true }, { v: `${r.pts} pts from ${r.mp} · ${r.w}-${r.d}-${r.l}` }]);
+      svg.append(dot);
+    });
+  });
   svg.append(sv('path', { d: fin.map(([k, f], i) => (i && yr(k) - yr(fin[i - 1][0]) === 1 ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(f.pos).toFixed(1)).join(''), fill: 'none', stroke: A, 'stroke-width': 2, 'stroke-linejoin': 'round' }));
   fin.forEach(([k, f], i) => {
     const eu = /europa|uefa|conference|champions/i.test(f.notes || '');
@@ -300,7 +342,7 @@ function positionChart(fin) {
     svg.append(dot);
   });
   const anyEu = fin.some(([, f]) => /europa|uefa|conference|champions/i.test(f.notes || ''));
-  return h('div', null, svg, legend([['League position', A, 'line'], ['League champions', css('--warn')]].concat(anyEu ? [['Qualified for Europe (from 2000/01)', A]] : [])), h('p', { class: 'note', text: 'The line at 6th marks the top-six split, used since 2000/01. Earlier top flights had 10 to 20 clubs. Seasons outside the top flight are left out.' }));
+  return h('div', null, svg, legend([[extras.length ? teamName(S.team) : 'League position', A, 'line']].concat(extras.map((e) => [e.name, e.color, 'line']), [['League champions', css('--warn')]], anyEu ? [['Qualified for Europe (from 2000/01)', A]] : [])), h('p', { class: 'note', text: 'The line at 6th marks the top-six split, used since 2000/01. Earlier top flights had 10 to 20 clubs. Seasons outside the top flight are left out.' }));
 }
 
 // Same club, same player id (club + name), each season's totals
