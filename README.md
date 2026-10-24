@@ -253,3 +253,11 @@ knockout), Challenge Cup and Europe, with round, venue, score, penalty shootouts
 not cards), stadium, attendance and referee. League games and friendlies are skipped. Drop the file in the
 Data tab (it goes with its season) or list it under `layers` in the snapshot manifest. These are results
 only: line-ups, formations and team stats for cup games need the API-Football cup download.
+
+## Cup matches from Sportmonks
+Plans that include the Scottish League Cup and Scottish Cup can download them like the league:
+`node tools/fetch-sportmonks.mjs --find "League Cup"` prints the id, then `--league <id>` (add `--season <id>`
+for past seasons, from `--list-seasons`). Dropped in the Data tab, the file adds every tie involving a club in
+the loaded season as a cup match with line-ups, formations, events, team and player stats (group stage and
+knockout; penalty shootouts are read from the scores). A Wikipedia result for the same tie gives way and
+keeps its attendance and referee. Competition is set to All competitions after the import.

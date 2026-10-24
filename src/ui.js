@@ -1270,7 +1270,7 @@ function addSportmonks(files, statusEl, opts = {}) {
   let last = null;
   for (const f of files) {
     const r = attachSportmonks(DB, f.data);
-    if (!r.matched) return say(`None of the ${r.finished} matches in ${f.name} match the loaded season (${DB.label}). Check it is the same league and season.`);
+    if (!r.matched) return say(r.cup ? `None of the ${r.league} ties in ${f.name} involve a club in the loaded season (${DB.label}). Check it is the same season.` : `None of the ${r.finished} matches in ${f.name} match the loaded season (${DB.label}). Check it is the same league and season.`);
     last = r;
   }
   cache.clear();
@@ -1278,6 +1278,11 @@ function addSportmonks(files, statusEl, opts = {}) {
   if (!opts.nosave) {
     if (DB.pastSeason) { const k = DB.season; Promise.all(files.map((f) => pastAddLayer(k, { name: f.name, text: f.text }))).then(refreshSeasons); } // goes with that past season
     else saveLayers(files.map((f) => ({ name: f.name, text: f.text })));
+  }
+  if (last.cup) {
+    S.comp = 'all'; S.tab = 'matches'; S.match = null; render();
+    flash(`Added ${last.league} ${last.season || ''}: ${last.matched} ties with line-ups, formations, goals, cards, substitutions and player stats` + (last.upcoming ? `, plus ${last.upcoming} upcoming` : '') + '. Competition is set to All competitions, so every tab includes them; pick League only to leave them out.');
+    return true;
   }
   S.player = null; S.form = null; S.tab = 'players'; S.sort = 'min';
   render();

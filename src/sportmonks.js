@@ -19,6 +19,44 @@ const SM_PLAYER = {
   'Blocked Shots': 'blk', 'Fouls Drawn': 'fd', 'Error Lead To Shot': 'errSh', 'Error Lead To Goal': 'errG', 'Man of Match': 'motm', 'Accurate Crosses': 'crossOk',
 };
 const smIsBundle = (d) => d && d.source === 'sportmonks' && Array.isArray(d.fixtures);
+const smIsCup = (b) => /cup|trophy|shield|challenge/i.test((b.league && b.league.name) || '');
+// Penalty shootout from the scores Sportmonks lists, and the score before it (a shootout follows a draw)
+function smScore(f) {
+  let hg = f.score.home, ag = f.score.away, pens = null;
+  const pk = Object.keys(f.scores || {}).find((k) => /pen/i.test(k));
+  if (pk && f.scores[pk].home != null && f.scores[pk].away != null) {
+    pens = { f: f.scores[pk].home, a: f.scores[pk].away }; // home first, like hg/ag
+    if (hg !== ag && hg - pens.f === ag - pens.a) { hg -= pens.f; ag -= pens.a; } // the total included the shootout
+  }
+  return { hg, ag, pens };
+}
+// A cup tie with full detail, built like a league match; a results-only version of the same tie gives way
+function smCupMatch(db, b, f, typeOf) {
+  const H = fbEnsureTeam(db, f.home.name), A = fbEnsureTeam(db, f.away.name), date = String(f.date || '').slice(0, 10);
+  const { hg, ag, pens } = smScore(f);
+  const round = [f.stage && !/^(regular season|main)$|knockout/i.test(f.stage) && !String(f.roundName || '').toLowerCase().includes(String(f.stage).toLowerCase()) ? f.stage : '', f.roundName && !/^\d+$/.test(f.roundName) ? f.roundName : f.roundName ? 'Matchday ' + f.roundName : ''].filter(Boolean).join(' · ');
+  const stat = (team, name) => { const x = (f.stats || []).find((y) => y.team === team && typeOf[y.type] === name); return x && typeof x.value === 'number' ? x.value : NaN; };
+  const ts = {};
+  [[H, f.home.id, f.away.id], [A, f.away.id, f.home.id]].forEach(([T, me, op]) => {
+    const s = blankTeam();
+    Object.keys(s).forEach((k) => { if (typeof s[k] === 'number') s[k] = NaN; });
+    s.n = 1; s.g = T === H ? hg : ag; s.ga = T === H ? ag : hg;
+    const won = s.g > s.ga || (s.g === s.ga && pens && (T === H ? pens.f > pens.a : pens.a > pens.f));
+    s.w = won ? 1 : 0; s.l = s.g < s.ga || (s.g === s.ga && pens && !won) ? 1 : 0; s.d = s.w || s.l ? 0 : 1; s.pts = 3 * s.w + s.d;
+    s.sh = stat(me, 'Shots Total'); s.sha = stat(op, 'Shots Total'); s.sot = stat(me, 'Shots On Target');
+    s.cor = stat(me, 'Corners'); s.fls = stat(me, 'Fouls'); s.yc = stat(me, 'Yellowcards');
+    ts[T] = s;
+  });
+  const venue = f.venue || '';
+  const m = {
+    id: 'smc-' + f.id, cup: true, comp: b.league.name, round, date, neutral: /hampden/i.test(venue) && /semi|final/i.test(round),
+    home: H, away: A, hg, ag, pens, forms: {}, lineups: {}, subs: {}, minutes: {}, events: [], poss: [], ts, ps: {}, timeline: [], detail: true, info: { venue },
+  };
+  const old = (db.cups || []).filter((x) => x.id === m.id || (x.id.startsWith('cup-') && x.date && fbDays(x.date, date) <= 1 && [x.home, x.away].includes(H) && [x.home, x.away].includes(A)));
+  old.forEach((o) => { m.info = { ...o.info, ...m.info, venue: venue || (o.info && o.info.stadium) || '' }; });
+  db.cups = (db.cups || []).filter((x) => !old.includes(x)).concat(m).sort((a, c) => (a.date || '').localeCompare(c.date || ''));
+  return m;
+}
 
 // Player id for a Sportmonks name: the same id another source gave that player when the names
 // differ only by a short first name ("Dan Happe" / "Daniel Happe"), else the usual key.
@@ -49,15 +87,23 @@ function attachSportmonks(db, b) {
   let finished = 0, matched = 0, upcoming = 0;
   const unmatched = [];
 
+  const cup = smIsCup(b);
   b.fixtures.forEach((f) => {
-    const H = tid(f.home), A = tid(f.away), date = String(f.date || '').slice(0, 10);
-    if (!f.score) { // upcoming: add to both clubs' fixture lists
-      if (H && A && date) { addFixture(db, H, { date, time: String(f.date).slice(11, 16), comp: b.league.name, venue: 'H', opp: f.away.name }); addFixture(db, A, { date, time: String(f.date).slice(11, 16), comp: b.league.name, venue: 'A', opp: f.home.name }); upcoming++; }
+    let H = tid(f.home), A = tid(f.away);
+    const date = String(f.date || '').slice(0, 10);
+    if (!f.score) { // upcoming: add to the fixture lists of the league's clubs
+      const round = cup ? f.roundName || f.stage || '' : '';
+      if (H && date) addFixture(db, H, { date, time: String(f.date).slice(11, 16), comp: b.league.name, round, venue: 'H', opp: f.away ? f.away.name : 'TBC' });
+      if (A && date) addFixture(db, A, { date, time: String(f.date).slice(11, 16), comp: b.league.name, round, venue: 'A', opp: f.home ? f.home.name : 'TBC' });
+      if (H || A) upcoming++;
       return;
     }
+    if (cup && !H && !A) return; // a tie between two clubs outside this league
     finished++;
-    const m = H && A && db.matches.find((x) => x.home === H && x.away === A && x.date && fbDays(x.date, date) <= 1);
+    // Cup ties become cup matches (lower-league opponents included); league matches are matched to the season file
+    const m = cup ? smCupMatch(db, b, f, typeOf) : H && A && db.matches.find((x) => x.home === H && x.away === A && x.date && fbDays(x.date, date) <= 1);
     if (!m) { unmatched.push(`${date} ${f.home && f.home.name} v ${f.away && f.away.name}`); return; }
+    if (cup) { H = m.home; A = m.away; }
     matched++;
     const sideOf = { [f.home.id]: H, [f.away.id]: A };
     const T = (smTeam) => sideOf[smTeam];
@@ -134,7 +180,7 @@ function attachSportmonks(db, b) {
     });
     m.timeline = timeline;
     // Per-player result context: goal difference on the pitch, team points per appearance, clean sheets
-    const ptsFor = (team) => { const gf = team === m.home ? m.hg : m.ag, ga = team === m.home ? m.ag : m.hg; return gf > ga ? 3 : gf === ga ? 1 : 0; };
+    const ptsFor = (team) => { const t = m.ts[team]; if (t && has(t.pts)) return t.pts; const gf = team === m.home ? m.hg : m.ag, ga = team === m.home ? m.ag : m.hg; return gf > ga ? 3 : gf === ga ? 1 : 0; };
     Object.entries(m.ps).forEach(([id, s]) => {
       const p = db.players[id];
       if (!p || (p.team !== H && p.team !== A) || !(s.min > 0) || !p.fromLineups) return;
@@ -155,9 +201,9 @@ function attachSportmonks(db, b) {
     m.info = { ...(m.info || {}), venue: f.venue || (m.info && m.info.venue) };
   });
   Object.entries(roleCount).forEach(([pid, rc]) => { if (db.players[pid]) db.players[pid].role = Object.entries(rc).sort((a, c) => c[1] - a[1])[0][0]; });
-  db.hasLineups = db.matches.some((m) => Object.values(m.lineups || {}).some((l) => l.length));
+  db.hasLineups = db.matches.concat(db.cups || []).some((m) => Object.values(m.lineups || {}).some((l) => l.length));
   db.hasPlayers = true;
-  return { finished, matched, unmatched, upcoming, season: b.season && b.season.name, league: b.league && b.league.name };
+  return { finished, matched, unmatched, upcoming, cup, season: b.season && b.season.name, league: b.league && b.league.name };
 }
 
 if (typeof module !== 'undefined') module.exports = { attachSportmonks, smIsBundle };

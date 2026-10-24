@@ -13,6 +13,11 @@
     --season <id>   Season id (default: the league's current season).
     --out <file>    Output file (default: sportmonks-<league>-<season>.json).
     --list-seasons  List the league's seasons and their ids (free plan: past seasons included).
+    --find <name>   Find a competition's id by name, e.g. --find "League Cup" or --find "Scottish Cup".
+
+  Cups work the same way (Scottish League Cup group stage and knockout, Scottish Cup): find the id,
+  then download with --league <id>. The file holds every tie in the cup; Touchline Lab keeps them
+  as cup matches with the same detail as the league.
 
   Saves line-ups (with formation positions), formations, events (goals, assists, cards,
   substitutions), team statistics and per-player match statistics for every finished
@@ -26,7 +31,7 @@ const opt = (name, def) => { const i = args.indexOf('--' + name); return i >= 0 
 const token = process.env.SPORTMONKS_TOKEN;
 if (!token) { console.error('Set your token first, e.g.  SPORTMONKS_TOKEN=abc123 node tools/fetch-sportmonks.mjs'); process.exit(1); }
 const BASE = 'https://api.sportmonks.com/v3/football';
-const INCLUDES = 'participants;scores;state;venue;statistics.type;lineups.details.type;events.type;formations';
+const INCLUDES = 'participants;scores;state;venue;round;stage;statistics.type;lineups.details.type;events.type;formations';
 
 let calls = 0;
 async function api(path) {
@@ -45,6 +50,12 @@ const day = (d) => d.toISOString().slice(0, 10);
 
 async function main() {
   const league = Number(opt('league', 501));
+  if (opt('find')) {
+    const r = await api(`/leagues/search/${encodeURIComponent(opt('find'))}?include=country&per_page=50`);
+    (r.data || []).forEach((x) => console.log(`  --league ${x.id}`.padEnd(18), x.name + (x.country ? ' (' + x.country.name + ')' : '') + (x.sub_type ? ' · ' + x.sub_type : '')));
+    if (!(r.data || []).length) console.log('  Nothing found. Try a shorter name.');
+    return;
+  }
   if (args.includes('--list-seasons')) {
     const r = await api(`/seasons?filters=seasonLeagues:${league}&per_page=50`);
     r.data.sort((a, b) => b.name.localeCompare(a.name)).forEach((x) => console.log(`  --season ${x.id}`.padEnd(18), x.name + (x.is_current ? '  (current)' : '')));
@@ -77,9 +88,12 @@ async function main() {
   const fixtures = raw.sort((x, y) => x.starting_at.localeCompare(y.starting_at)).map((f) => {
     const side = (loc) => { const p = (f.participants || []).find((x) => x.meta && x.meta.location === loc); return p ? { id: p.id, name: p.name } : null; };
     const goals = (loc) => { const sc = (f.scores || []).find((x) => x.description === 'CURRENT' && x.score && x.score.participant === loc); return sc ? sc.score.goals : null; };
-    const fx = { id: f.id, date: f.starting_at, state: f.state && f.state.developer_name, venue: f.venue && f.venue.name, round: f.round_id, home: side('home'), away: side('away') };
+    const fx = { id: f.id, date: f.starting_at, state: f.state && f.state.developer_name, venue: f.venue && f.venue.name, round: f.round_id, roundName: f.round && f.round.name, stage: f.stage && f.stage.name, home: side('home'), away: side('away') };
     if (!finished(f)) return fx;
     fx.score = { home: goals('home'), away: goals('away') };
+    // Every score Sportmonks gives (half time, extra time, penalty shootout), so a shootout can be told apart
+    fx.scores = {};
+    (f.scores || []).forEach((x) => { if (x.description && x.score) (fx.scores[x.description] = fx.scores[x.description] || {})[x.score.participant] = x.score.goals; });
     fx.formations = Object.fromEntries((f.formations || []).map((x) => [x.participant_id, x.formation]));
     fx.stats = (f.statistics || []).map((x) => { T(x.type); return { team: x.participant_id, type: x.type_id, value: x.data && x.data.value }; });
     fx.lineups = (f.lineups || []).map((l) => {
