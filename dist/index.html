@@ -2550,7 +2550,7 @@ const result = (m, T) => {
 const venueOf = (m, T) => (m.neutral ? 'N' : m.home === T ? 'H' : 'A');
 // "Semi-finals" -> "SF", "League Cup" -> "LC" for compact labels
 const roundShort = (r) => { const s = String(r || ''); return /semi/i.test(s) ? 'SF' : /quarter/i.test(s) ? 'QF' : /^final/i.test(s) ? 'Final' : /(round of|last) ?16/i.test(s) ? 'R16' : /group/i.test(s) ? 'Group' : /^(first|second|third|fourth|fifth|sixth) round/i.test(s) ? 'R' + (['first', 'second', 'third', 'fourth', 'fifth', 'sixth'].indexOf(s.split(' ')[0].toLowerCase()) + 1) : s.replace(/^round\s*/i, 'R').slice(0, 8); };
-const compShort = (c) => String(c || 'Cup').split(/\s+/).map((w) => w[0]).join('').toUpperCase();
+const compShort = (c) => (/conference/i.test(c) ? 'UECL' : /europa/i.test(c) ? 'UEL' : /champions/i.test(c) ? 'UCL' : String(c || 'Cup').split(/\s+/).map((w) => w[0]).join('').toUpperCase());
 const roundLabel = (m) => (m.cup ? `${compShort(m.comp)} ${roundShort(m.round)}`.trim() : 'R' + m.round);
 const matchLabel = (m, T) => `${roundLabel(m)} v ${teamName(oppOf(m, T))} (${venueOf(m, T)})`;
 const scoreText = (m, T) => goalsFor(m, T) + '–' + goalsAg(m, T) + (m.pens ? ` (${m.home === T ? m.pens.f : m.pens.a}–${m.home === T ? m.pens.a : m.pens.f} pens)` : '');

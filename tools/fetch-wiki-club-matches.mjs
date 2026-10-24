@@ -69,7 +69,12 @@ function parse(html) {
     const rows = m[0].match(/<tr[\s\S]*?<\/tr>/gi) || [];
     const c1 = (rows[0] || '').match(/<td[\s\S]*?<\/td>/gi) || [], c2 = (rows[1] || '').match(/<td[\s\S]*?<\/td>/gi) || [];
     if (c1.length < 4) continue;
-    const date = isoDate(text(c1[0])), round = (text(c1[0]).replace(/^.*?\d{4}\s*/, '').trim() || sub || '').replace(/\n/g, ' ');
+    const date = isoDate(text(c1[0]));
+    // The box's own round label, with the section it sits in when that label is only a leg or matchday
+    let round = text(c1[0]).replace(/^.*?\d{4}\s*/, '').replace(/\n/g, ' ').trim();
+    if (/^\d+$/.test(round)) round = 'Matchday ' + round;
+    if (!round) round = sub;
+    else if (sub && /leg|^matchday/i.test(round) && !round.toLowerCase().includes(sub.toLowerCase())) round = sub + ' · ' + round;
     const home = text(c1[1]), away = text(c1[3]), score = text(c1[2]);
     const sm = score.match(/(\d+)\s*[–-]\s*(\d+)/);
     if (!date || !sm) continue; // not played yet
