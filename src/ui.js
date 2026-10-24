@@ -1104,7 +1104,7 @@ function matchReport(m, T) {
     const aT = m.ts[T], aO = m.ts[O];
     const keys = statKeys(aT, aO);
     grid.append(h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '8px' }, text: 'Match stats' }),
-      keys.length ? butterfly(teamName(T), teamName(O), keys, aT, aO, colA, colB) : h('p', { class: 'empty', text: m.cup ? 'Cup match: only the result and match details are recorded (football-data.co.uk covers league matches only).' : m.detail === false ? 'Details for this match have not been downloaded yet.' : 'No match stats in this data.' })));
+      keys.length ? butterfly(teamName(T), teamName(O), keys, aT, aO, colA, colB) : h('p', { class: 'empty', text: m.cup ? (m.src === 'Wikipedia' ? 'Cup match from Wikipedia: score, scorers and goal times, stadium, crowd and referee. Line-ups, formations and match stats need a cup download from Sportmonks (a plan that includes the Scottish cups) or API-Football (Pro), added in the Data tab.' : 'Cup match: only the result and match details are recorded. Line-ups, formations and match stats need a cup download from Sportmonks or API-Football, added in the Data tab.') : m.detail === false ? 'Details for this match have not been downloaded yet.' : 'No match stats in this data.' })));
     const side = h('div', { class: 'stack' });
     if (m.odds) side.append(oddsBlock(m, T, colA, colB));
     if (m.timeline && m.timeline.length) side.append(h('div', null, h('div', { class: 'eyebrow', style: { marginBottom: '8px' }, text: 'Timeline' }), matchTimeline(m, T, colA, colB)));
