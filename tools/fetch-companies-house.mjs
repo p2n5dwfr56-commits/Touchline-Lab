@@ -196,7 +196,7 @@ function parseFiling(text, meta) {
   // whole figures (not £m with decimals) and a pre-tax line
   const fullTurnover = (x) => LABELS.turnover.test(x) && !/\d\.\d/.test(x) && (() => { const v = pick(lineNums(x)); return v && Math.abs(v.cur) >= 100; })();
   const plStart = lines.findIndex((l, i) => /(profit and loss account|statement of (comprehensive )?income|income statement)/i.test(l + ' ' + (lines[i + 1] || '')) && !/(notes? (on|to)|section 408|no separate|is presented|included in|dealt with)/i.test(l)
-    && lines.slice(i, i + 30).some(fullTurnover) && lines.slice(i, i + 30).some((x) => LABELS.preTax.test(x)));
+    && lines.slice(i, i + 30).some(fullTurnover) && lines.slice(i, i + 30).some((x) => LABELS.preTax.test(x) || LABELS.result.test(x) || /^tax on/i.test(x)));
   const bsStart = lines.findIndex((l, i) => i > plStart && /balance sheets?|statement of financial position/i.test(l) && !/notes?/i.test(l) && lines.slice(i, i + 40).some((x) => /fixed assets|current assets/i.test(x)));
   const pl = plStart >= 0 ? lines.slice(plStart, plStart + 40) : [];
   // Figures in thousands when the statement's column heads say £000 (or £'000)
@@ -224,12 +224,15 @@ function parseFiling(text, meta) {
     f.opResult = find(pl, LABELS.opResult, 0);
     f.preTax = find(pl, LABELS.preTax, 0);
     f.result = find(pl, LABELS.result, 0);
+    // No pre-tax line and no interest between the operating result and tax: they are the same figure
+    if (!f.preTax && f.opResult && !pl.some((x) => /interest|finance (income|costs?|expense)/i.test(x))) f.preTax = f.opResult;
   }
   // Staff costs from the notes: the total line, else wages and salaries
   f.staff = (pl.length && find(pl, LABELS.staff, minK)) || find(lines, LABELS.staff, minK); // the statement's own line first
   f.wages = find(lines, LABELS.wages, minK);
   f.cash = find(bs, LABELS.cash, 0);
   f.netAssets = find(bs, LABELS.netAssets, 0);
+  if (f.netAssets && f.netAssets.prev != null && f.netAssets.cur === f.netAssets.prev && f.netAssets.cur !== 0) f.netAssets = null; // the same to the pound two years running: not the club's own balance sheet
   // Turnover split (the turnover note: a block of income lines ending in the total)
   const split = {};
   if (f.turnover) {
@@ -284,7 +287,7 @@ async function main() {
       // Newest filings first: a year's own accounts win; the next year's previous-year column fills what they lack
       const own = { yearEnd: ye, ...r.cur, unit: r.unit, plFound: r.plFound, checks: r.checks, source: { filed: meta.filed, format: meta.format } };
       // Set from the following year's filing (prev column), if that was read first; its date can differ by a day or two
-      const near = Object.keys(years).find((k) => k !== ye && Math.abs(Date.parse(k) - Date.parse(ye)) <= 10 * 864e5);
+      const near = Object.keys(years).find((k) => k !== ye && Math.abs(Date.parse(k) - Date.parse(ye)) <= 45 * 864e5);
       const later = years[ye] || (near ? years[near] : null);
       if (near && !years[ye]) delete years[near];
       years[ye] = own;
@@ -303,6 +306,16 @@ async function main() {
       const y = years[ye];
       if (y.disagree) console.log('     readings differ: ' + Object.entries(y.disagree).map(([k, [a, b]]) => `${k} ${a} / ${b}`).join(', '));
       console.log(`  ${ye}: turnover ${y.turnover ?? '–'} · staff ${y.staff ?? '–'} · op ${y.opResult ?? '–'} · pre-tax ${y.preTax ?? '–'} · cash ${y.cash ?? '–'} · net assets ${y.netAssets ?? '–'}${r.plFound ? '' : ' (no P&L)'}`);
+    });
+    // Year ends within 45 days of each other are the same year (a change of accounting date): one entry, own filing first
+    Object.keys(years).sort().reverse().forEach((k) => {
+      if (!years[k]) return;
+      Object.keys(years).forEach((j) => {
+        if (j === k || !years[j] || Math.abs(Date.parse(j) - Date.parse(k)) > 45 * 864e5) return;
+        const [keep, drop] = years[k].fromLater && !years[j].fromLater ? [j, k] : [k, j];
+        Object.entries(years[drop]).forEach(([f, v]) => { if (years[keep][f] == null && v != null && typeof v === 'number') years[keep][f] = v; });
+        delete years[drop];
+      });
     });
     // Two readings about ten times apart: keep the one in line with the club's other years
     Object.values(years).forEach((y) => Object.entries(y.disagree || {}).forEach(([k, [a, b]]) => {

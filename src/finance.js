@@ -29,7 +29,11 @@ const ratio = (y) => (y && y.staff != null && y.turnover ? (100 * y.staff) / y.t
 const finYears = (c) => (c ? c.years.filter((y) => y.turnover != null || y.netAssets != null || y.preTax != null).sort((a, b) => a.yearEnd.localeCompare(b.yearEnd)) : []);
 
 function viewFinance(el) {
-  const key = fbTeamKey(teamName(S.team));
+  // The club shown: one picked here (any league with accounts loaded), else the team chosen at the top
+  const teamKey = fbTeamKey(teamName(S.team));
+  if (S.finTeam !== S.team) { S.finClub = null; S.finTeam = S.team; } // a new team at the top resets the pick
+  const key = S.finClub && FIN[S.finClub] ? S.finClub : teamKey;
+  const nm = FIN[key] ? FIN[key].club : teamName(S.team);
   const clubs = Object.entries(FIN);
   if (!clubs.length) {
     el.append(card({ title: 'Finances', span: true }, null, h('p', { class: 'note', style: { marginTop: 0 }, text: 'No club accounts are loaded. Run tools/fetch-companies-house.mjs with a free Companies House API key, then drop the file it writes in the Data tab.' })));
@@ -37,7 +41,11 @@ function viewFinance(el) {
   }
   const C = FIN[key], ys = finYears(C);
   const A = css('--team-a'), B = css('--ink-2');
-  el.append(h('div', { class: 'hero' }, h('h1', { text: teamName(S.team) }), h('div', { class: 'meta' },
+  const leaguesHere = [...new Set(Object.values(FIN).map((c) => c.league || 'Premiership'))];
+  const picker = h('select', { 'aria-label': 'Club', onchange: (e) => { S.finClub = e.target.value; S.finLeague = (FIN[e.target.value] || {}).league || S.finLeague; render(); window.scrollTo({ top: 0 }); } },
+    leaguesHere.map((lg) => h('optgroup', { label: lg }, Object.entries(FIN).filter(([, c]) => (c.league || 'Premiership') === lg).sort((a, b) => a[1].club.localeCompare(b[1].club)).map(([k, c]) => h('option', { value: k, selected: k === key, text: c.club })))));
+  el.append(h('div', { class: 'field', style: { maxWidth: '260px', margin: '0 0 8px' } }, h('label', { text: 'Club accounts' }), picker));
+  el.append(h('div', { class: 'hero' }, h('h1', { text: nm }), h('div', { class: 'meta' },
     h('span', { text: C ? `Annual accounts · ${ys.length} financial years · company ${C.company}` : 'No accounts loaded for this club' }))));
   const grid = h('div', { class: 'grid' });
   el.append(grid);
@@ -96,7 +104,7 @@ function viewFinance(el) {
       })))),
       h('p', { class: 'note' }, 'Operating result is as each set of accounts states it: some clubs and years show it before player sales, others after, so compare turnover, staff costs and pre-tax results across clubs. * from the previous-year column of the next year’s accounts. † two sets of accounts give different figures (hover for both). ≈ rounded figure from the directors’ report where the statement page could not be read. Filings: ',
         h('a', { href: C.url, target: '_blank', rel: 'noopener', text: 'Companies House' }), '.')));
-  } else grid.append(card({ title: 'Finances', span: true }, null, h('p', { class: 'note', style: { marginTop: 0 }, text: `No accounts are loaded for ${teamName(S.team)}. The loaded file covers: ${clubs.map(([, c]) => c.club).join(', ')}.` })));
+  } else grid.append(card({ title: 'Finances', span: true }, null, h('p', { class: 'note', style: { marginTop: 0 }, text: `No accounts are loaded for ${nm}. The loaded file covers: ${clubs.map(([, c]) => c.club).join(', ')}.` })));
 
   leagueFinance(grid, key);
 }
@@ -153,7 +161,7 @@ function leagueFinance(grid, key) {
   if (rows.length < 2) return;
   grid.append(card({ title: lg + ' clubs compared', span: true, tools: lgTools }, 'Each club’s latest accounts with a profit and loss account · year ends differ (May or June), so the season shown is the one each year mostly covers', h('div', { class: 'tbl-wrap' }, h('table', null,
     h('thead', null, h('tr', null, ['Club', 'Year to', 'Turnover', 'Staff costs', 'Wages / turnover', 'Player sales', 'Pre-tax', 'Net assets', 'League that season', 'Staff cost per point'].map((t, i) => h('th', { class: i < 2 ? 'l' : '', text: t })))),
-    h('tbody', null, rows.map((r) => h('tr', { class: r.k === key ? 'focus' : '', onclick: () => { const t = DB.teams.find((x) => fbTeamKey(x.name) === r.k); if (t) { S.team = t.id; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); } }, title: 'Show ' + r.c.club },
+    h('tbody', null, rows.map((r) => h('tr', { class: r.k === key ? 'focus' : '', onclick: () => { S.finClub = r.k; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }, title: 'Show ' + r.c.club },
       h('td', { class: 'l' }, h('b', { text: r.c.club })), h('td', { class: 'l sub', text: fmtYE(r.y.yearEnd) }),
       h('td', { text: money(r.y.turnover) }), h('td', { text: money(r.y.staff) }), h('td', { text: Number.isFinite(ratio(r.y)) ? ratio(r.y).toFixed(0) + '%' : '–' }),
       h('td', { text: money(r.y.playerSales) }), h('td', { class: r.y.preTax != null && r.y.preTax < 0 ? 'neg' : '', text: money(r.y.preTax) }), h('td', { text: money(r.y.netAssets) }),
