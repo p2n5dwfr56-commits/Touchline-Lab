@@ -103,7 +103,7 @@ function viewSeasons(el) {
     // Older still, from Wikipedia's list of the club's seasons: record, position, cups, top scorer
     if (W) Object.values(W.seasons).forEach((w) => {
       if (out.some((x) => x.season === w.season)) return;
-      if (w.pld == null) { out.push({ season: w.season, histOnly: 'Wikipedia', noteRow: w.note || w.division }); return; }
+      if (w.pld == null) { out.push({ season: w.season, histOnly: 'Wikipedia', noteRow: w.note || (w.pos ? w.division + ' · ' + w.pos + ' (Wikipedia lists the position only)' : w.division) }); return; }
       out.push({ season: w.season, histOnly: 'Wikipedia', div: w.division, r: { pos: parseInt(w.pos, 10) || null, of: null, race: [], players: false, champ: parseInt(w.pos, 10) === 1 ? teamName(S.team) : null, a: { n: w.pld, w: w.w, d: w.d, l: w.l, g: w.gf, ga: w.ga, pts: w.pts, mxp: NaN, sh: NaN, sha: NaN, xg: NaN, xga: NaN } } });
     });
     return out.sort((a, b) => b.season.localeCompare(a.season));
@@ -132,7 +132,7 @@ function viewSeasons(el) {
         if (x.noteRow) return h('tr', { style: { cursor: 'default' } }, h('td', { class: 'l' }, h('b', { text: x.season })), h('td', { class: 'l sub', colspan: ncol - 1, text: x.noteRow }));
         const a = x.r.a, g = (v, d) => fmt(safe(v, a.n), d);
         const f = hl(x), su = hs(x), w = hw(x);
-        const lower = x.div && !/prem|spl|div(ision)? ?(1|a|one)\b|sco div 1/i.test(x.div) ? ' (' + x.div.replace(/^sco\s*/i, '') + ')' : '';
+        const lower = x.div && !isTopFlight(x.season, x.div, w && w.tier) ? ' (' + x.div.replace(/^sco\s*/i, '') + ')' : '';
         const old = x.fbOnly || x.histOnly;
         return h('tr', { class: x.season === DB.season ? 'focus' : '', style: old ? { cursor: 'default' } : null, onclick: old ? null : () => { if (loadSeason(x.season)) { S.tab = 'overview'; render(); window.scrollTo({ top: 0 }); } }, title: old ? x.season + ' (from ' + (x.histOnly || 'FBref') + ': league record only)' : 'Open ' + x.season },
           h('td', { class: 'l' }, h('b', { text: x.season }), x.current ? h('span', { class: 'sub', text: ' now' }) : old ? h('span', { class: 'sub', text: lower || '' }) : null), h('td', null, h('b', { text: x.r.pos ? ordinal(x.r.pos) : '–' })),
@@ -148,30 +148,32 @@ function viewSeasons(el) {
 
   // League finishes, and European campaigns (FBref club history)
   // Every season with a position, top flight only (a second-tier finish isn't comparable)
-  const fin = asc.filter((x) => x.r.pos && !(x.div && /div 2|second|division two|div b/i.test(x.div))).map((x) => {
+  const fin = asc.filter((x) => x.r.pos && !(x.div && !isTopFlight(x.season, x.div, (hw(x) || {}).tier))).map((x) => {
     const f = hl(x), w = hw(x);
     const notes = f && f.notes ? f.notes : w && w.europe ? '' : '';
     return [x.season, { pos: x.r.pos, pts: x.r.a.pts, mp: x.r.a.n, w: x.r.a.w, d: x.r.a.d, l: x.r.a.l, scorer: scorerOf(x) === '–' ? '' : scorerOf(x), notes, title: x.r.pos === 1 }];
   });
   if (fin.length >= 3) {
-    // Other clubs' finishes from every season with a full league table (football-data files: 1994/95 on)
+    // Other clubs' finishes: every season with a full league table (football-data files: 1994/95 on), and before that
+    // the top-flight seasons in each club's Wikipedia list of seasons, where loaded
     const P = seasonPositions();
     const clubs = {};
-    Object.values(P).forEach((t) => Object.entries(t).forEach(([tk, r]) => { if (tk !== key) (clubs[tk] = clubs[tk] || { name: r.name, n: 0 }).n++; }));
+    Object.entries(P).forEach(([season, t]) => Object.entries(t).forEach(([tk, r]) => { if (tk === key) return; const c = (clubs[tk] = clubs[tk] || { name: r.name, n: 0, first: season }); c.n++; if (season < c.first) c.first = season; }));
     const PAL = ['--c1', '--c3', '--c4', '--c5'].map(css);
     S.finPick = (S.finPick || []).filter((tk) => clubs[tk]);
-    const first = Object.keys(P).sort()[0];
+    const first = Object.keys(P).filter((k) => Object.values(P[k]).some((r) => !r.hist)).sort()[0]; // first season with every club's table
     // Comparing zooms to the seasons other clubs have; the full span stays one click away
-    const toggle = (tk) => { const i = S.finPick.indexOf(tk); if (i >= 0) S.finPick.splice(i, 1); else { if (!S.finPick.length && !S.finSpan) S.finSpan = 'recent'; S.finPick.push(tk); if (S.finPick.length > PAL.length) S.finPick.shift(); } const y = window.scrollY; render(); window.scrollTo(0, y); };
+    const toggle = (tk) => { const i = S.finPick.indexOf(tk); if (i >= 0) S.finPick.splice(i, 1); else { if (!S.finPick.length && !S.finSpan && !(first && clubs[tk].first < first)) S.finSpan = 'recent'; S.finPick.push(tk); if (S.finPick.length > PAL.length) S.finPick.shift(); } const y = window.scrollY; render(); window.scrollTo(0, y); };
     const span = first && fin[0][0] < first ? S.finSpan || 'all' : 'all';
     const shown = span === 'recent' ? fin.filter(([k]) => k >= first) : fin;
     const tools = first && fin[0][0] < first ? seg([['all', 'Since ' + fin[0][0].slice(0, 4)], ['recent', 'Since ' + first]], span, (v) => { S.finSpan = v; const y = window.scrollY; render(); window.scrollTo(0, y); }, 'Seasons shown') : null;
+    const older = Object.values(clubs).some((c) => first && c.first < first);
     const extras = S.finPick.map((tk, i) => ({ name: clubs[tk].name, color: PAL[i % PAL.length], at: Object.fromEntries(Object.entries(P).filter(([, t]) => t[tk]).map(([season, t]) => [season, t[tk]])) }));
     const chips = Object.keys(clubs).length ? h('div', { class: 'ask-chips', style: { margin: '0 0 10px' } }, Object.entries(clubs).sort((a, b) => b[1].n - a[1].n || a[1].name.localeCompare(b[1].name)).map(([tk, c]) => {
       const i = S.finPick.indexOf(tk), col = i >= 0 ? PAL[i % PAL.length] : null;
-      return h('button', { type: 'button', class: 'ask-chip att-chip', 'aria-pressed': String(i >= 0), title: `${c.n} top-flight seasons since ${Object.keys(P).sort()[0]}`, onclick: () => toggle(tk) }, h('i', { style: { background: col || 'transparent', borderColor: col || 'var(--rule-2)' } }), c.name);
+      return h('button', { type: 'button', class: 'ask-chip att-chip', 'aria-pressed': String(i >= 0), title: `${c.n} top-flight seasons since ${c.first}`, onclick: () => toggle(tk) }, h('i', { style: { background: col || 'transparent', borderColor: col || 'var(--rule-2)' } }), c.name);
     })) : null;
-    grid.append(card({ title: 'League finishes', span: true, tools }, `${teamName(S.team)}’s final league position, ${shown[0][0]} to ${shown[shown.length - 1][0]}${chips ? ` · click clubs to compare (up to ${PAL.length}; their positions from ${first})` : ''}`, chips, positionChart(shown, extras)));
+    grid.append(card({ title: 'League finishes', span: true, tools }, `${teamName(S.team)}’s final league position, ${shown[0][0]} to ${shown[shown.length - 1][0]}${chips ? ` · click clubs to compare (up to ${PAL.length}; ${older ? 'top-flight seasons before ' + first + ' from each club’s Wikipedia list of seasons' : 'their positions from ' + first})` : ''}`, chips, positionChart(shown, extras)));
   }
   if (H) {
     const eu = Object.keys(H.summary).concat(Object.keys(H.europe)).filter((k, i, arr) => arr.indexOf(k) === i && ((H.summary[k] && H.summary[k].europe) || H.europe[k])).sort().reverse();
@@ -300,13 +302,20 @@ function attendanceCard(grid, key) {
 // Final league position by season, 1st at the top
 // Every club's final position in each season with a league table, keyed by club
 function seasonPositions() {
-  return memo('seasonPos|' + allSeasons().length + '|' + (SEASONS.real ? SEASONS.real.matches.length : 0), () => {
+  return memo('seasonPos|' + allSeasons().length + '|' + (SEASONS.real ? SEASONS.real.matches.length : 0) + '|' + Object.keys(CLUBHIST).length, () => {
     const out = {};
     allSeasons().forEach((x) => {
       const db = x.db || seasonDB(x.season);
       if (!db || !db.matches.length) return;
       out[x.season] = Object.fromEntries(leagueTable(db, null).map((r) => [fbTeamKey(r.team.name), { name: r.team.name, pos: r.pos, pts: r.a.pts, mp: r.a.n, w: r.a.w, d: r.a.d, l: r.a.l }]));
     });
+    // Before the full tables: each club's own list of seasons (top flight only)
+    const full = Object.keys(out).sort()[0];
+    Object.entries(CLUBHIST).forEach(([tk, H]) => Object.values(H.seasons).forEach((w) => {
+      const pos = parseInt(w.pos, 10);
+      if ((full && w.season >= full) || !pos || !isTopFlight(w.season, w.division, w.tier)) return;
+      (out[w.season] = out[w.season] || {})[tk] = { name: H.club, pos, pts: w.pts, mp: w.pld, w: w.w, d: w.d, l: w.l, hist: true };
+    }));
     return out;
   });
 }
@@ -329,7 +338,7 @@ function positionChart(fin, extras = []) {
     svg.append(sv('path', { d: pts.map(([k, r], j) => (j && idx[k] - idx[pts[j - 1][0]] === 1 ? 'L' : 'M') + X(idx[k]).toFixed(1) + ' ' + Y(r.pos).toFixed(1)).join(''), fill: 'none', stroke: e.color, 'stroke-width': 2, 'stroke-linejoin': 'round', opacity: 0.9 }));
     pts.forEach(([k, r]) => {
       const dot = sv('circle', { cx: X(idx[k]), cy: Y(r.pos), r: r.pos === 1 ? 5 : 3, fill: r.pos === 1 ? css('--warn') : e.color, stroke: css('--surface'), 'stroke-width': 1, tabindex: 0 });
-      hover(dot, () => [{ v: `${e.name} · ${k} · ${ordinal(r.pos)}`, strong: true }, { v: `${r.pts} pts from ${r.mp} · ${r.w}-${r.d}-${r.l}` }]);
+      hover(dot, () => [{ v: `${e.name} · ${k} · ${ordinal(r.pos)}`, strong: true }, r.mp != null ? { v: `${r.pts} pts from ${r.mp} · ${r.w}-${r.d}-${r.l}` } : { v: 'position only (Wikipedia)' }]);
       svg.append(dot);
     });
   });

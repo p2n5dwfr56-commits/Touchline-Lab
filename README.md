@@ -238,7 +238,10 @@ at the club matches.
 `tools/fetch-wiki-club-seasons.mjs --page "List of Aberdeen F.C. seasons" --club Aberdeen` reads Wikipedia's
 list of a club's seasons (merged cells handled) into one file: division, record, position, Scottish Cup,
 League Cup, Europe and top league scorer(s) for every season, with wartime years noted. Snapshot builds
-carry Aberdeen's (`clubHistory` in the manifest); the Data tab accepts the file for other clubs. The Seasons
+carry Aberdeen's and 18 other clubs' (`clubHistory` in the manifest; the page headers vary, so P/Pld, F/GF,
+Pos/Position/FP and Tier columns are all read); the Data tab accepts the file for other clubs. League finishes
+uses the other clubs' top-flight seasons (`isTopFlight`: Division One/A before 1975, Premier from 1975) to
+compare positions before 1994/95, where full league tables start. Raith Rovers has no such Wikipedia list. The Seasons
 table then runs from 1904/05: older seasons show the league record, cups and top scorer, PPG counts 3 points
 for a win in every era, and League finishes marks league titles. Attendances come from the supplied CSV
 (1976/77 on; partial-coverage averages are left out).

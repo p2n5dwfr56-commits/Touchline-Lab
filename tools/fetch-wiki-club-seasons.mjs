@@ -19,7 +19,7 @@ const UA = { 'User-Agent': 'TouchlineLab/1.0 (personal football stats app)' };
 
 const decode = (s) => s.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n)).replace(/&[a-z]+;/g, '');
 // Cell text with line breaks kept as " / " (several scorers share a cell)
-const cell = (c) => decode(c.replace(/<sup[\s\S]*?<\/sup>/gi, '').replace(/<br\s*\/?>|<hr\s*\/?>/gi, ' / ').replace(/<\/(li|p|div)>/gi, ' / ').replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').replace(/(\s*\/\s*)+$/, '').replace(/^(\s*\/\s*)+/, '').trim();
+const cell = (c) => decode(c.replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<sup[\s\S]*?<\/sup>/gi, '').replace(/<br\s*\/?>|<hr\s*\/?>/gi, ' / ').replace(/<\/(li|p|div)>/gi, ' / ').replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').replace(/(\s*\/\s*)+$/, '').replace(/^(\s*\/\s*)+/, '').trim();
 const seasonKey = (s) => { const m = String(s).match(/^(\d{4})\s*[–-]\s*(\d{2,4})/); if (!m) return ''; const y = +m[1]; return y + '/' + String((y + 1) % 100).padStart(2, '0'); };
 const num = (v) => { const n = parseInt(String(v || '').replace(/[^0-9-]/g, ''), 10); return Number.isFinite(n) ? n : null; };
 
@@ -44,22 +44,29 @@ function parse(html) {
   const out = [];
   for (const t of html.match(/<table[\s\S]*?<\/table>/gi) || []) {
     const rows = grid(t);
-    const hi = rows.findIndex((r) => r.includes('Pld') && r.includes('Pos'));
+    // The column labels row: one with a finishing position and a games-played or points column
+    const POS = ['Pos', 'Position', 'FP'], PLD = ['Pld', 'P', 'GP', 'Pl'];
+    const hi = rows.findIndex((r) => r.some((c) => POS.includes(c)) && r.some((c) => PLD.includes(c) || c === 'Pts' || c === 'Division'));
     if (hi < 1) continue;
     // Two header rows: the top one names the groups (Season, League, Scottish Cup, League Cup, Europe, Top league goalscorer(s)),
-    // the second the columns inside them
+    // the second the columns inside them. Labels vary page to page (P or Pld, F or GF, Pos, Position or FP).
     const top = rows[hi - 1], sub = rows[hi];
-    const colOf = (re, label) => top.findIndex((g, i) => re.test(g) && (label == null || sub[i] === label));
-    const C = { div: colOf(/league/i, 'Division'), pld: colOf(/league/i, 'Pld'), w: colOf(/league/i, 'W'), d: colOf(/league/i, 'D'), l: colOf(/league/i, 'L'), gf: colOf(/league/i, 'GF'), ga: colOf(/league/i, 'GA'), pts: colOf(/league/i, 'Pts'), pos: colOf(/league/i, 'Pos'),
-      sc: colOf(/scottish cup/i), lc: colOf(/league cup/i), eu: top.findIndex((g) => /europe/i.test(g)), sco: top.findIndex((g) => /scorer/i.test(g)) };
+    const colOf = (re, labels) => top.findIndex((g, i) => re.test(g || '') && (labels == null || labels.includes(sub[i])));
+    const L = /league/i;
+    const C = { div: colOf(L, ['Division', 'Div', 'League', 'League record']), pld: colOf(L, PLD), w: colOf(L, ['W']), d: colOf(L, ['D']), l: colOf(L, ['L']), gf: colOf(L, ['GF', 'F']), ga: colOf(L, ['GA', 'A']), pts: colOf(L, ['Pts']), pos: colOf(L, POS),
+      sc: top.findIndex((g) => /scot/i.test(g || '')), lc: top.findIndex((g) => /leag[\w.]*\s*\/?\s*cup/i.test(g || '')), eu: top.findIndex((g) => /europ/i.test(g || '')), sco: top.findIndex((g) => /scorer/i.test(g || '')) };
+    C.tier = top.findIndex((g, i) => /^tier$/i.test(g || '') || /^tier$/i.test(sub[i] || ''));
+    if (C.pos < 0) continue;
     rows.slice(hi + 1).forEach((r) => {
       const season = seasonKey(r[0]);
       if (!season) return;
-      const pld = num(r[C.pld]);
-      const row = { season, division: r[C.div] || '', note: '' };
+      const pld = C.pld >= 0 ? num(r[C.pld]) : null, div = (r[C.div] || '').replace(/[↑↓]/g, '').trim();
+      const row = { season, division: div, note: '' };
+      if (C.tier >= 0 && num(r[C.tier]) != null) row.tier = num(r[C.tier]);
+      if (C.pld < 0 && div && r[C.pos] && /\d/.test(r[C.pos])) { Object.assign(row, { pos: r[C.pos], scottishCup: C.sc >= 0 ? r[C.sc] || '' : '', leagueCup: C.lc >= 0 ? r[C.lc] || '' : '' }); out.push(row); return; } // a page that lists only division and position
       if (pld == null || /cancel|dropped out|no competitive/i.test(r[C.div] || '')) { row.note = [...new Set(r.slice(1).filter(Boolean))].join(' · '); out.push(row); return; } // wartime and other non-league years
       const euro = C.eu >= 0 ? [...new Set([r[C.eu], r[C.eu + 1]].filter(Boolean))] : [];
-      Object.assign(row, { pld, w: num(r[C.w]), d: num(r[C.d]), l: num(r[C.l]), gf: num(r[C.gf]), ga: num(r[C.ga]), pts: num(r[C.pts]), pos: r[C.pos] || '',
+      Object.assign(row, { pld, w: num(r[C.w]), d: num(r[C.d]), l: num(r[C.l]), gf: num(r[C.gf]), ga: num(r[C.ga]), pts: num(r[C.pts]), pos: (r[C.pos] || '').replace(/[↑↓]/g, '').trim(),
         scottishCup: C.sc >= 0 ? r[C.sc] || '' : '', leagueCup: C.lc >= 0 ? r[C.lc] || '' : '', europe: euro.join(' · '),
         scorers: C.sco >= 0 ? r[C.sco] || '' : '', goals: C.sco >= 0 ? num(r[C.sco + 1]) : null });
       out.push(row);

@@ -335,6 +335,16 @@ function addClubHistory(d) {
   return { club: d.club, seasons: d.seasons.length, first: d.seasons.length ? d.seasons[0].season : '' };
 }
 
+// Whether a season's division was Scotland's top flight. Names vary page to page ("SFL", "Sco Div 1", "SD1", "Premier
+// Division", "SPL", "Prem"); "First Division" was the top flight until 1975 and the second tier after. A Tier column wins.
+function isTopFlight(season, division, tier) {
+  if (tier != null) return tier === 1;
+  const y = parseInt(season, 10), d = String(division || '').toLowerCase().replace(/[.↑↓]/g, '').trim().replace(/^(scottish|sco|sfl|spfl)\s+/, '');
+  if (!d || (y >= 1939 && y <= 1945)) return false; // wartime regional leagues
+  if (y >= 1975) return /^(prem\w*( division| league)?|spd|spl|sp|pd|pl)$/.test(d);
+  return /^(div(ision)?\s*(one|1|a)|1|a|one|first|d1|sd1|sda|da|fd|sfd|a division|first division|sfl|league|football league)$/.test(d);
+}
+
 function noteHistoryAttendance(db) {
   Object.entries(db.fbHistory || {}).forEach(([key, Hh]) => Object.entries(Hh.league || {}).forEach(([season, f]) => {
     if (f.att == null || f.att <= 0) return;
