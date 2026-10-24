@@ -70,8 +70,11 @@ select { background: var(--surface); border: 1px solid var(--rule-2); border-rad
 .seg button + button { border-left: 1px solid var(--rule-2); }
 .seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
 .seg button:hover:not([aria-pressed="true"]) { background: var(--surface-2); }
-.tabs { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
-.tabs button { background: none; border: 0; padding: 9px 12px 10px; font-family: var(--font-display); font-weight: 600; font-size: 16px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); border-bottom: 3px solid transparent; white-space: nowrap; }
+.tabs { display: flex; flex-direction: column; gap: 0; } /* labelled rows of tabs rather than a scrolling strip */
+.tab-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0 2px; border-top: 1px solid var(--rule); }
+.tab-row:first-child { border-top: 0; }
+.tab-label { width: 120px; flex: none; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.tabs button { background: none; border: 0; padding: 7px 10px 8px; font-family: var(--font-display); font-weight: 600; font-size: 15px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); border-bottom: 3px solid transparent; white-space: nowrap; }
 .tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
 .tabs button:hover { color: var(--ink); }
 
@@ -358,3 +361,9 @@ td.neg { color: var(--bad); }
 .ref-meter { position: relative; display: inline-block; width: 90px; height: 8px; border-radius: 4px; vertical-align: middle; background: linear-gradient(90deg, var(--good), var(--surface-2) 50%, var(--bad)); opacity: 0.9; }
 .ref-meter i { position: absolute; top: -3px; width: 4px; height: 14px; margin-left: -2px; border-radius: 2px; }
 .ref-table .ref-focus { background: color-mix(in srgb, var(--team-a) 7%, transparent); }
+
+/* Value for money grades */
+.grade { display: inline-block; min-width: 1.6em; padding: 1px 6px; border-radius: 4px; font-weight: 700; text-align: center; color: #fff; }
+.grade.gA { background: var(--good); } .grade.gB { background: color-mix(in srgb, var(--good) 60%, var(--muted)); }
+.grade.gC { background: var(--muted); } .grade.gD { background: color-mix(in srgb, var(--bad) 60%, var(--muted)); } .grade.gE { background: var(--bad); }
+@media (max-width: 640px) { .tabs button { font-size: 13px; padding: 6px 8px 7px; letter-spacing: 0.03em; } .tab-label { width: 100%; padding-top: 6px; font-size: 10px; } }

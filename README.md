@@ -295,3 +295,11 @@ each over their whole career: yellows, reds and penalties a game, four "awards",
 each club, the selected club's cup ties by referee (Wikipedia match reports: result, cards where listed,
 penalties scored), a penalties-for-and-against table per club and season, and sets the selected club's results and cards with
 each referee against its own average (the "conspiracy meter"). Names are matched on initial and surname.
+
+## Value for money
+The Finances tab opens with a grading of Premiership clubs over their last 3, 5 or 10 financial years in the
+top flight. Results combine league points a game (60%), European progress each season (the furthest round
+from the club history's Europe entry, with extra for the Champions League proper; 25%) and trophies (15%),
+standardised across the clubs. Value is each club's results against the line of results on log staff costs
+across the clubs. Both, and their average, are graded A to E, with a short label (e.g. "Punching above their
+weight"). Clubs without published staff costs are not graded.

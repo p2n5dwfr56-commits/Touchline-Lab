@@ -453,7 +453,12 @@ function renderChrome() {
     compSel,
     h('div', { class: 'field' }, h('label', { for: 'f-venue', text: 'Venue' }), venueSel),
     h('div', { class: 'field' }, h('label', { for: 'f-range', text: 'Matches' }), rangeSel)].filter(Boolean));
-  tabsEl.replaceChildren(...TABS.map(([k, l]) => h('button', { role: 'tab', 'aria-selected': String(S.tab === k), onclick: () => { S.tab = k; try { history.replaceState(null, '', '#' + k); } catch (e) {} render(); window.scrollTo({ top: 0 }); }, text: l })));
+  // Tabs in three labelled rows rather than one long strip
+  const tabBtn = ([k, l]) => h('button', { role: 'tab', 'aria-selected': String(S.tab === k), onclick: () => { S.tab = k; try { history.replaceState(null, '', '#' + k); } catch (e) {} render(); window.scrollTo({ top: 0 }); }, text: l });
+  const TAB_GROUPS = [['Team', ['overview', 'team', 'press', 'tactics', 'players', 'key', 'compare']], ['League & club', ['opponents', 'refs', 'seasons', 'managers', 'finance']], ['Matchday & data', ['matchday', 'matches', 'ask', 'data']]];
+  const grouped = new Set(TAB_GROUPS.flatMap(([, ks]) => ks));
+  tabsEl.replaceChildren(...TAB_GROUPS.map(([label, ks], i) => h('div', { class: 'tab-row', role: 'presentation' }, h('span', { class: 'tab-label', text: label }),
+    ...TABS.filter(([k]) => ks.includes(k) || (i === TAB_GROUPS.length - 1 && !grouped.has(k))).map(tabBtn))));
 }
 function render() {
   noteReal();
