@@ -140,9 +140,12 @@ async function download(club, number) {
 /* ---------- Reading the figures ---------- */
 const NUM = /\(?(?:-(?=£?\d))?£?\s?\d{1,3}(?:[,.]\d{3})+\)?|\(?(?:-(?=£?\d))?£?\d+\)?|(?<=\s)[-–—](?=\s*$)/g;
 // Numbers at the end of a line: "Turnover 5 21712 23631" -> note 5, values [21712, 23631]
+let JOIN_POUNDS = false;
 function lineNums(line) {
   const tail = line.replace(/^[^\d(–—-]*?(?=[\s(]*[\d(]|\s[-–—]\s)/, '');
-  const toks = (tail.match(NUM) || []).map((t) => t.trim());
+  let toks = (tail.match(NUM) || []).map((t) => t.trim());
+  // Figures in whole pounds: a scan that turned the second comma into a space ("9,756 998") is joined back
+  if (JOIN_POUNDS) toks = toks.reduce((o, t) => { const p = o[o.length - 1]; if (p && /^\(?-?£?\d{1,3},\d{3}$/.test(p) && /^\d{3}\)?$/.test(t)) o[o.length - 1] = p + ',' + t; else o.push(t); return o; }, []);
   if (toks.length >= 4 && /^[-–—]$/.test(toks[toks.length - 1])) toks.pop(); // a stray dash after the last column
   const vals = toks.map((t) => (/^[-–—]$/.test(t) ? 0 : (t.includes('(') || /^-/.test(t) ? -1 : 1) * Number(t.replace(/[^\d]/g, ''))));
   return vals;
@@ -172,6 +175,7 @@ const LABELS = {
 const SPLIT = { gate: /^(gate receipts|match ?day|ticketing|season tickets and gate)/i, broadcast: /^(broadcast|television|tv)/i, sponsorship: /^(sponsorship|advertising and sponsorship)/i, commercial: /^(commercial|retail|merchandising|catering)/i, europe: /^(uefa|european|prize money)/i };
 
 function parseFiling(text, meta) {
+  JOIN_POUNDS = (text.match(/£\s?['’`]?\s?000\b/g) || []).length < 3; // accounts in whole pounds, not thousands
   const pages = text.split('\f').length > 2 ? text.split('\f') : text.split(/\n(?=.*(?:Consolidated|Group|Company)?\s*(?:Profit and Loss Account|Statement of Comprehensive Income|Income Statement|Balance Sheet))/i);
   // OCR noise: stray marks between label and figures, braces for brackets, leading dots
   const raw = text.split('\n').map((l) => l.replace(/[|_>*'"“”‘]/g, ' ').replace(/\{/g, '(').replace(/\}/g, ')').replace(/\s[.:;,]+(?=\s)/g, ' ').replace(/^[\s.:;,'-]+/, '').replace(/\s+/g, ' ').trim()).filter(Boolean);
@@ -272,7 +276,10 @@ async function main() {
       const src = { filed: meta.filed, format: meta.format, doc: meta.doc.replace('document-api.company-information.service.gov.uk/document/', 'find-and-update.company-information.service.gov.uk/company/' + number + '/filing-history/').replace(/\/[^/]+$/, '') };
       // Newest filings first: a year's own accounts win; the next year's previous-year column fills what they lack
       const own = { yearEnd: ye, ...r.cur, unit: r.unit, plFound: r.plFound, checks: r.checks, source: { filed: meta.filed, format: meta.format } };
-      const later = years[ye]; // set from the following year's filing (prev column), if that was read first
+      // Set from the following year's filing (prev column), if that was read first; its date can differ by a day or two
+      const near = Object.keys(years).find((k) => k !== ye && Math.abs(Date.parse(k) - Date.parse(ye)) <= 10 * 864e5);
+      const later = years[ye] || (near ? years[near] : null);
+      if (near && !years[ye]) delete years[near];
       years[ye] = own;
       if (later) Object.entries(later).forEach(([k, v]) => {
         if (['yearEnd', 'source', 'checks', 'fromLater', 'plFound', 'unit', 'split'].includes(k) || v == null) return;
@@ -292,6 +299,7 @@ async function main() {
     // Two readings about ten times apart: keep the one in line with the club's other years
     Object.values(years).forEach((y) => Object.entries(y.disagree || {}).forEach(([k, [a, b]]) => {
       const r = Math.abs(a) / (Math.abs(b) || 1);
+      if ((r > 600 && r < 1500) || (r > 1 / 1500 && r < 1 / 600)) { y[k] = Math.abs(a) < Math.abs(b) ? a : b; return; } // a column joined on: the smaller reading
       if (!((r > 6 && r < 15) || (r > 1 / 15 && r < 1 / 6))) return;
       const others = Object.values(years).filter((z) => z !== y && z[k] != null).map((z) => Math.abs(z[k])).sort((p, q) => p - q);
       if (!others.length) return;
