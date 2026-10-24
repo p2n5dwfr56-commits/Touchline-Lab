@@ -7,7 +7,7 @@ const m = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
 const file = (name) => ({ name: name.replace(/^.*\//, ''), text: compact(name, readFileSync(join(dir, name), 'utf8')) });
 
 // Keep only what the app reads, to keep the page small
-const FD_COLS = /^(Div|Date|HomeTeam|AwayTeam|FTHG|FTAG|Attendance|HS|AS|HST|AST|HF|AF|HC|AC|HY|AY|HR|AR|HxG|AxG|Avg[HDA]|BbAv[HDA]|PS[HDA]|B365[HDA]|WH[HDA])$/;
+const FD_COLS = /^(Div|Date|HomeTeam|AwayTeam|FTHG|FTAG|Attendance|Referee|HS|AS|HST|AST|HF|AF|HC|AC|HY|AY|HR|AR|HxG|AxG|Avg[HDA]|BbAv[HDA]|PS[HDA]|B365[HDA]|WH[HDA])$/;
 const SM_TYPES = /^(Corners|Redcards|Minutes Played|Touches|Passes|Accurate Passes|Key Passes|Goals|Assists|Shots Total|Shots On Target|Tackles|Interceptions|Ball Recovery|Clearances|Total Duels|Duels Won|Dribble Attempts|Successful Dribbles|Fouls|Total Crosses|Yellowcards|Saves|Goalkeeper Goals Conceded|Rating|Aerials Won|Aerials Lost|Tackles Won|Big Chances Created|Passes In Final Third|Long Balls|Long Balls Won|Possession Lost|Dispossessed|Dribbled Past|Blocked Shots|Fouls Drawn|Error Lead To Shot|Error Lead To Goal|Man of Match|Accurate Crosses|Ball Possession %)$/;
 function compact(name, text) {
   if (/\.csv$/i.test(name)) {

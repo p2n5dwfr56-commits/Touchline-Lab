@@ -285,3 +285,10 @@ current manager, tenure figures, a timeline of every manager over the league fin
 spell's record: matches between the appointment and departure dates (league results from 1994/95, cups
 where loaded), points per game, first-10-match points, best league finish, and trophies credited to the
 manager in charge when each season ended. Spells dated to the year only get no match record.
+
+## Ref Watch
+A light-hearted tab built on the referee named for each league match in the football-data.co.uk files
+(2000/01 on; none for 2012/13), now kept by the importer and the snapshot. For a chosen span of seasons it
+ranks referees by yellows, reds, fouls and home win rate against the league average, hands out three
+"awards", shows one referee's record with each club, and sets the selected club's results and cards with
+each referee against its own average (the "conspiracy meter"). Names are matched on initial and surname.
