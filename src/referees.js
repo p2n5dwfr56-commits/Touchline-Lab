@@ -96,9 +96,6 @@ function viewReferees(el) {
   const byRef = {};
   L.forEach((m) => (byRef[m.ref] = byRef[m.ref] || []).push(m));
   const refs = Object.entries(byRef).map(([k, ms]) => ({ k, ms, st: refStats(ms) })).filter((r) => r.st.n >= minN);
-  const sortKey = S.refSort || 'y';
-  const sorters = { y: (a, b) => b.st.y - a.st.y, r: (a, b) => b.st.r - a.st.r, p: (a, b) => (b.st.np >= 10 ? b.st.p : -1) - (a.st.np >= 10 ? a.st.p : -1), n: (a, b) => b.st.n - a.st.n };
-  refs.sort(sorters[sortKey] || sorters.y);
   const grid = h('div', { class: 'grid' });
   el.append(h('div', { class: 'kpis' }, [
     [who === 'current' ? 'Matches by current referees' : 'Matches by retired referees', L.length, `${from} to ${seasons[0]} (league)`],
@@ -114,26 +111,27 @@ function viewReferees(el) {
       .map(([v, l]) => h('div', null, h('b', { text: v }), h('span', { text: l }))))));
 
   const anyPen = refs.some((r) => r.st.np);
-  // The measure chosen above is the highlighted column, with a bar against the average for these referees
-  const M = [['y', 'Yellows a game', (r) => r.st.y, lg.y], ['r', 'Reds a game', (r) => r.st.r, lg.r]].concat(anyPen ? [['p', 'Penalties a game', (r) => (r.st.np >= 10 ? r.st.p : NaN), lg.p]] : []);
-  const focusM = M.find(([k]) => k === sortKey);
-  const cellFor = ([k, , f, avg], r) => {
-    const v = f(r);
-    if (!has(v)) return h('td', { text: '–', title: k === 'p' ? (r.st.np ? `Only ${r.st.np} matches with penalty records` : 'No penalty records') : '' });
-    const tip = k === 'p' ? `${r.st.pens} penalties in ${r.st.np} matches with records` : k === 'r' ? `${r.st.reds} red cards in ${r.st.n} matches` : '';
-    if (!focusM || focusM[0] !== k) return h('td', { text: fmt(v, 2), title: tip || null });
-    return h('td', { class: 'l ref-focus', title: tip || null }, h('b', { text: fmt(v, 2), style: { display: 'inline-block', width: '3em' } }),
+  // Click a heading to sort; the sorted measure gets the bar against the average for these referees
+  const avgOf = { y: lg.y, r: lg.r, p: lg.p };
+  const measure = (k, t, f, tipF) => ({ k, t, val: f, first: -1, cls: 'l', cell: (r, on) => {
+    const v = f(r), tip = tipF ? tipF(r) : null;
+    if (!has(v)) return h('td', { class: 'l', text: '–', title: k === 'p' ? (r.st.np ? `Only ${r.st.np} matches with penalty records` : 'No penalty records') : null });
+    if (!on) return h('td', { class: 'l', text: fmt(v, 2), title: tip });
+    const avg = avgOf[k];
+    return h('td', { class: 'l ref-focus', title: tip }, h('b', { text: fmt(v, 2), style: { display: 'inline-block', width: '3em' } }),
       h('span', { class: 'ref-bar', title: `Average ${fmt(avg, 2)}` }, h('i', { style: { width: Math.min(100, (50 * v) / (avg || 1)) + '%', background: v > avg ? 'var(--bad)' : 'var(--good)' } }), h('em')));
-  };
-  grid.append(card({ title: 'Every referee', span: true, tools: h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } }, tools, seg([['y', 'Yellows'], ['r', 'Reds']].concat(anyPen ? [['p', 'Penalties']] : [], [['n', 'Matches']]), sortKey, (v) => { S.refSort = v; rerender(); }, 'Sort by')) },
-    `${who === 'current' ? 'Referees who took a league match this season or last' : 'Referees with no league match in the last two seasons'} · whole careers since 2000/01 · ${minN}+ matches · click a referee for their record with each club`,
-    h('div', { class: 'tbl-wrap' }, h('table', { class: 'ref-table' },
-      h('thead', null, h('tr', null, h('th', { class: 'l', text: 'Referee' }), h('th', { class: sortKey === 'n' ? 'ref-focus' : '', text: 'Matches' + (sortKey === 'n' ? ' ▼' : '') }),
-        M.map(([k, t]) => h('th', { class: k === sortKey ? 'l ref-focus' : '', text: t + (k === sortKey ? ' ▼' : '') })))),
-      h('tbody', null, refs.map((r) => h('tr', { class: S.refSel === r.k ? 'focus' : '', onclick: () => { S.refSel = S.refSel === r.k ? null : r.k; rerender(); } },
-        h('td', { class: 'l' }, h('b', { text: name(r.k) })), h('td', { class: sortKey === 'n' ? 'ref-focus' : '' }, sortKey === 'n' ? h('b', { text: r.st.n }) : String(r.st.n)),
-        M.map((m) => cellFor(m, r))))))),
-    h('p', { class: 'note', text: (focusM ? `Bars: red is above the average for these referees (${fmt(focusM[3], focusM[0] === 'y' ? 2 : 2)} ${focusM[1].toLowerCase()}, the line in the middle), green below. ` : '') + 'Card counts rose over the years, so compare current referees with each other. Penalties include missed ones, from match records for 2008/09 onwards (shown with 10+ matches of records). Referees named by football-data.co.uk (none for 2012/13).' })));
+  } });
+  const refCols = [
+    { k: 'name', t: 'Referee', cls: 'l', first: 1, val: (r) => r.k.split(' ').slice(-1)[0], cell: (r) => h('td', { class: 'l' }, h('b', { text: name(r.k) })) },
+    { k: 'n', t: 'Matches', first: -1, val: (r) => r.st.n, cell: (r, on) => h('td', { class: on ? 'ref-focus' : '' }, on ? h('b', { text: r.st.n }) : String(r.st.n)) },
+    measure('y', 'Yellows a game', (r) => r.st.y), measure('r', 'Reds a game', (r) => r.st.r, (r) => `${r.st.reds} red cards in ${r.st.n} matches`),
+  ].concat(anyPen ? [measure('p', 'Penalties a game', (r) => (r.st.np >= 10 ? r.st.p : NaN), (r) => `${r.st.pens} penalties in ${r.st.np} matches with records`)] : []);
+  const RT = sortTable('refs', refCols, refs, { k: 'y', dir: -1 }, (r) => ({ class: S.refSel === r.k ? 'focus' : '', onclick: () => { S.refSel = S.refSel === r.k ? null : r.k; rerender(); } }), { class: 'ref-table' });
+  const focusK = ['y', 'r', 'p'].includes(RT.key) ? RT.key : null, focusT = { y: 'yellows a game', r: 'reds a game', p: 'penalties a game' }[focusK];
+  grid.append(card({ title: 'Every referee', span: true, tools },
+    `${who === 'current' ? 'Referees who took a league match this season or last' : 'Referees with no league match in the last two seasons'} · whole careers since 2000/01 · ${minN}+ matches · click a heading to sort, a referee for their record with each club`,
+    h('div', { class: 'tbl-wrap' }, RT.table),
+    h('p', { class: 'note', text: (focusK ? `Bars: red is above the average for these referees (${fmt(avgOf[focusK], 2)} ${focusT}, the line in the middle), green below. ` : '') + 'Card counts rose over the years, so compare current referees with each other. Penalties include missed ones, from match records for 2008/09 onwards (shown with 10+ matches of records). Referees named by football-data.co.uk (none for 2012/13).' })));
 
   if (S.refSel && byRef[S.refSel]) grid.append(refDetail(S.refSel, byRef[S.refSel], name, lg));
   refClub(grid, L, name, minN);
@@ -148,11 +146,16 @@ function refDetail(k, ms, name, lg) {
     const c = (clubs[ck] = clubs[ck] || { name: cn, n: 0, y: 0, oy: 0, p: 0, op: 0, np: 0, pts: 0, w: 0, d: 0, l: 0 });
     c.n++; c.y += y || 0; c.oy += oy || 0; if (p != null) { c.np++; c.p += p; c.op += op || 0; } c.pts += gd > 0 ? 3 : gd === 0 ? 1 : 0; c[gd > 0 ? 'w' : gd === 0 ? 'd' : 'l']++;
   }));
-  const rows = Object.values(clubs).filter((c) => c.n >= 3).sort((a, b) => b.n - a.n);
-  return card({ title: name(k), span: true }, `${st.n} league matches · ${fmt(st.y, 2)} yellows, ${fmt(st.r, 2)} reds${st.np ? ` and ${fmt(st.p, 2)} penalties` : ''} a game (league ${fmt(lg.y, 2)}, ${fmt(lg.r, 2)}${lg.np ? `, ${fmt(lg.p, 2)}` : ''}) · clubs with 3+ games`, h('div', { class: 'tbl-wrap' }, h('table', null,
-    h('thead', null, h('tr', null, ['Club', 'Games', 'Points a game', 'Yellows a game', 'Penalties for / against'].map((t, i) => h('th', { class: i === 0 ? 'l' : '', text: t })))),
-    h('tbody', null, rows.map((c) => h('tr', { style: { cursor: 'default' } }, h('td', { class: 'l' }, h('b', { text: c.name })), h('td', { text: c.n }),
-      h('td', { text: (c.pts / c.n).toFixed(2) }), h('td', { text: (c.y / c.n).toFixed(2) }), h('td', { text: c.np ? `${c.p} / ${c.op}` : '–' })))))),
+  const rows = Object.values(clubs).filter((c) => c.n >= 3);
+  const T = sortTable('refDetail', [
+    { k: 'club', t: 'Club', cls: 'l', first: 1, val: (c) => c.name, cell: (c) => h('td', { class: 'l' }, h('b', { text: c.name })) },
+    { k: 'n', t: 'Games', first: -1, val: (c) => c.n, cell: (c) => h('td', { text: c.n }) },
+    { k: 'ppg', t: 'Points a game', first: -1, val: (c) => c.pts / c.n, cell: (c) => h('td', { text: (c.pts / c.n).toFixed(2) }) },
+    { k: 'y', t: 'Yellows a game', first: -1, val: (c) => c.y / c.n, cell: (c) => h('td', { text: (c.y / c.n).toFixed(2) }) },
+    { k: 'pf', t: 'Penalties for', first: -1, val: (c) => (c.np ? c.p : null), cell: (c) => h('td', { text: c.np ? c.p : '–' }) },
+    { k: 'pa', t: 'Penalties against', first: -1, val: (c) => (c.np ? c.op : null), cell: (c) => h('td', { text: c.np ? c.op : '–' }) },
+  ], rows, { k: 'n', dir: -1 });
+  return card({ title: name(k), span: true }, `${st.n} league matches · ${fmt(st.y, 2)} yellows, ${fmt(st.r, 2)} reds${st.np ? ` and ${fmt(st.p, 2)} penalties` : ''} a game (league ${fmt(lg.y, 2)}, ${fmt(lg.r, 2)}${lg.np ? `, ${fmt(lg.p, 2)}` : ''}) · clubs with 3+ games`, h('div', { class: 'tbl-wrap' }, T.table),
     refCupList(k));
 }
 
@@ -187,10 +190,14 @@ function refCupList(k) {
   l.forEach((t) => { comps[t.comp] = (comps[t.comp] || 0) + 1; });
   return h('div', { style: { marginTop: '16px' } },
     h('div', { class: 'eyebrow', style: { marginBottom: '6px' }, text: `Cup ties · ${l.length} (${Object.entries(comps).sort((a, b) => b[1] - a[1]).map(([c, n]) => n + ' ' + c).join(', ')})` }),
-    h('div', { class: 'tbl-wrap' }, h('table', null,
-      h('thead', null, h('tr', null, ['Date', 'Round', 'Match', 'Score', 'Cards (home / away)', 'Penalties scored'].map((t, i) => h('th', { class: i <= 2 ? 'l' : '', text: t })))),
-      h('tbody', null, l.slice(0, 30).map((t) => h('tr', { style: { cursor: 'default' } }, h('td', { class: 'l sub', text: fmtDate(t.date) + ' ' + t.date.slice(0, 4) }), h('td', { class: 'l', text: t.round }),
-        h('td', { class: 'l', text: `${t.home} v ${t.away}` }), h('td', null, h('b', { text: t.score })), h('td', { text: t.cards ? t.cards + (t.reds ? ` (${t.reds} red)` : '') : '–' }), h('td', { text: t.pens || '–' })))))),
+    h('div', { class: 'tbl-wrap' }, sortTable('refCupList', [
+      { k: 'date', t: 'Date', cls: 'l', first: -1, val: (t) => t.date, cell: (t) => h('td', { class: 'l sub', text: fmtDate(t.date) + ' ' + t.date.slice(0, 4) }) },
+      { k: 'round', t: 'Round', cls: 'l', first: 1, val: (t) => t.round, cell: (t) => h('td', { class: 'l', text: t.round }) },
+      { k: 'match', t: 'Match', cls: 'l', first: 1, val: (t) => t.home + ' ' + t.away, cell: (t) => h('td', { class: 'l', text: `${t.home} v ${t.away}` }) },
+      { k: 'score', t: 'Score', cell: (t) => h('td', null, h('b', { text: t.score })) },
+      { k: 'cards', t: 'Cards (home / away)', first: -1, val: (t) => (t.cards ? t.cards.split(' / ').reduce((a, b) => a + +b, 0) : null), cell: (t) => h('td', { text: t.cards ? t.cards + (t.reds ? ` (${t.reds} red)` : '') : '–' }) },
+      { k: 'pens', t: 'Penalties scored', first: -1, val: (t) => (t.pens ? t.pens.split(' / ').reduce((a, b) => a + (+b || 0), 0) : null), cell: (t) => h('td', { text: t.pens || '–' }) },
+    ], l.slice(0, 30), { k: 'date', dir: -1 }).table),
     h('p', { class: 'note', text: 'Cup ties from the Wikipedia match reports loaded (Aberdeen’s, 2010/11 on), so only ties involving that club appear. Cards where the report lists them; penalties are those scored.' + (l.length > 30 ? ` Showing the latest 30 of ${l.length}.` : '') }));
 }
 
@@ -215,15 +222,20 @@ function refClub(grid, L, name, minN) {
     h('div', { class: 'statline' },
       h('div', null, h('b', { text: name(worst.k) }), h('span', { text: `The one to fear · ${worst.a.ppg.toFixed(2)} pts a game, ${fmt(worst.a.y, 1)} yellows for us vs ${fmt(worst.a.oy, 1)} for them` + (worst.a.np ? `, penalties ${worst.a.p}–${worst.a.op}` : '') })),
       h('div', null, h('b', { text: name(best.k) }), h('span', { text: `The lucky charm · ${best.a.ppg.toFixed(2)} pts a game, ${fmt(best.a.y, 1)} yellows for us vs ${fmt(best.a.oy, 1)} for them` + (best.a.np ? `, penalties ${best.a.p}–${best.a.op}` : '') }))),
-    h('div', { class: 'tbl-wrap' }, h('table', null,
-      h('thead', null, h('tr', null, ['Referee', 'Games', 'Points a game', 'Yellows: us / them', 'Penalties: us / them', 'Conspiracy meter'].map((t, i) => h('th', { class: i === 0 || i === 5 ? 'l' : '', text: t, title: t === 'Conspiracy meter' ? 'Extra yellows for us, minus extra yellows for them, minus extra points, compared with our average with every referee' : null })))),
-      h('tbody', null, rows.map((r) => {
+    h('div', { class: 'tbl-wrap' }, sortTable('refClub', [
+      { k: 'ref', t: 'Referee', cls: 'l', first: 1, val: (r) => r.k.split(' ').slice(-1)[0], cell: (r) => h('td', { class: 'l' }, h('b', { text: name(r.k) })) },
+      { k: 'n', t: 'Games', first: -1, val: (r) => r.a.n, cell: (r) => h('td', { text: r.a.n }) },
+      { k: 'ppg', t: 'Points a game', first: -1, val: (r) => r.a.ppg, cell: (r) => h('td', { class: r.a.ppg < all.ppg ? 'neg' : '', text: r.a.ppg.toFixed(2) }) },
+      { k: 'y', t: 'Our yellows', tip: 'A game', first: -1, val: (r) => r.a.y, cell: (r) => h('td', { text: fmt(r.a.y, 1) }) },
+      { k: 'oy', t: 'Their yellows', tip: 'A game', first: -1, val: (r) => r.a.oy, cell: (r) => h('td', { text: fmt(r.a.oy, 1) }) },
+      { k: 'p', t: 'Our penalties', first: -1, val: (r) => (r.a.np ? r.a.p : null), cell: (r) => h('td', { text: r.a.np ? r.a.p : '–' }) },
+      { k: 'op', t: 'Their penalties', first: -1, val: (r) => (r.a.np ? r.a.op : null), cell: (r) => h('td', { text: r.a.np ? r.a.op : '–' }) },
+      { k: 'score', t: 'Conspiracy meter', cls: 'l', first: -1, tip: 'Extra yellows for us, minus extra yellows for them, minus extra points, compared with our average with every referee', val: (r) => r.score, cell: (r) => {
         const v = Math.max(-1, Math.min(1, r.score / 1.5));
-        return h('tr', { style: { cursor: 'default' } }, h('td', { class: 'l' }, h('b', { text: name(r.k) })), h('td', { text: r.a.n }),
-          h('td', { class: r.a.ppg < all.ppg ? 'neg' : '', text: r.a.ppg.toFixed(2) }), h('td', { text: `${fmt(r.a.y, 1)} / ${fmt(r.a.oy, 1)}` }), h('td', { text: r.a.np ? `${r.a.p} / ${r.a.op}` : '–' }),
-          h('td', { class: 'l' }, h('span', { class: 'ref-meter', title: r.score > 0.3 ? 'Suspicious…' : r.score < -0.3 ? 'One of ours' : 'Nothing to see here' }, h('i', { style: { left: (50 + 45 * v) + '%', background: v > 0.2 ? 'var(--bad)' : v < -0.2 ? 'var(--good)' : 'var(--muted)' } })), h('span', { class: 'sub', text: r.score > 0.3 ? ' suspicious…' : r.score < -0.3 ? ' one of ours' : ' nothing to see' })));
-      }))),
-    h('p', { class: 'note', text: 'For fun: a handful of games per referee is a small sample, referees are appointed to matches for reasons (big games get senior referees), and cards follow the fouls. The meter adds our extra yellows, subtracts theirs and subtracts any extra points, each compared with our average with every referee.' }))));
+        return h('td', { class: 'l' }, h('span', { class: 'ref-meter', title: r.score > 0.3 ? 'Suspicious…' : r.score < -0.3 ? 'One of ours' : 'Nothing to see here' }, h('i', { style: { left: (50 + 45 * v) + '%', background: v > 0.2 ? 'var(--bad)' : v < -0.2 ? 'var(--good)' : 'var(--muted)' } })), h('span', { class: 'sub', text: r.score > 0.3 ? ' suspicious…' : r.score < -0.3 ? ' one of ours' : ' nothing to see' }));
+      } },
+    ], rows, { k: 'score', dir: -1 }).table),
+    h('p', { class: 'note', text: 'For fun: a handful of games per referee is a small sample, referees are appointed to matches for reasons (big games get senior referees), and cards follow the fouls. The meter adds our extra yellows, subtracts theirs and subtracts any extra points, each compared with our average with every referee.' })));
 }
 
 // The selected club's cup ties by referee (Wikipedia match reports: referee, score, scorers and, where listed, cards)
@@ -261,14 +273,17 @@ function refCups(grid, name, who, last, recent) {
   }).sort((a, b) => b.l.length - a.l.length || a.k.localeCompare(b.k));
   if (!rows.length) return;
   grid.append(card({ title: `${teamName(S.team)} in cup ties`, span: true }, `${mine.length} cup ties with ${who === 'current' ? 'current' : 'retired'} referees · Scottish Cup, League Cup, Europe and others · from Wikipedia match reports (2010/11 on)`,
-    h('div', { class: 'tbl-wrap' }, h('table', null,
-      h('thead', null, h('tr', null, ['Referee', 'Ties', 'W-D-L', 'Win %', 'Cards: us / them', 'Penalties scored: us / them', 'Last tie'].map((t, i) => h('th', { class: i === 0 || i === 6 ? 'l' : '', text: t })))),
-      h('tbody', null, rows.map((r) => { const lt = r.l[r.l.length - 1];
-        return h('tr', { style: { cursor: 'default' } }, h('td', { class: 'l' }, h('b', { text: name(r.k) })), h('td', { text: r.l.length }), h('td', { text: `${r.w}-${r.d}-${r.lo}` }),
-          h('td', { class: r.w / r.l.length < 0.4 ? 'neg' : '', text: Math.round((100 * r.w) / r.l.length) + '%' }),
-          h('td', { title: r.nc ? `Yellows ${r.y} / ${r.oy}, reds ${r.r} / ${r.or}, in ${r.nc} ties with cards listed` : 'No cards listed for these ties', text: r.nc ? `${r.y + r.r} / ${r.oy + r.or}` : '–' }),
-          h('td', { text: `${r.p} / ${r.op}` }), h('td', { class: 'l sub', text: `${fmtDate(lt.date)} ${String(lt.date).slice(0, 4)} · ${lt.round} v ${lt.opp} ${lt.score} (${lt.res})` }));
-      })))),
+    h('div', { class: 'tbl-wrap' }, sortTable('refCups', [
+      { k: 'ref', t: 'Referee', cls: 'l', first: 1, val: (r) => r.k.split(' ').slice(-1)[0], cell: (r) => h('td', { class: 'l' }, h('b', { text: name(r.k) })) },
+      { k: 'n', t: 'Ties', first: -1, val: (r) => r.l.length, cell: (r) => h('td', { text: r.l.length }) },
+      { k: 'wdl', t: 'W-D-L', first: -1, val: (r) => r.w, cell: (r) => h('td', { text: `${r.w}-${r.d}-${r.lo}` }) },
+      { k: 'win', t: 'Win %', first: -1, val: (r) => r.w / r.l.length, cell: (r) => h('td', { class: r.w / r.l.length < 0.4 ? 'neg' : '', text: Math.round((100 * r.w) / r.l.length) + '%' }) },
+      { k: 'cards', t: 'Our cards', first: -1, val: (r) => (r.nc ? r.y + r.r : null), cell: (r) => h('td', { title: r.nc ? `Yellows ${r.y}, reds ${r.r}, in ${r.nc} ties with cards listed` : 'No cards listed for these ties', text: r.nc ? r.y + r.r : '–' }) },
+      { k: 'ocards', t: 'Their cards', first: -1, val: (r) => (r.nc ? r.oy + r.or : null), cell: (r) => h('td', { title: r.nc ? `Yellows ${r.oy}, reds ${r.or}` : null, text: r.nc ? r.oy + r.or : '–' }) },
+      { k: 'p', t: 'Our penalties', first: -1, val: (r) => r.p, cell: (r) => h('td', { text: r.p }) },
+      { k: 'op', t: 'Their penalties', first: -1, val: (r) => r.op, cell: (r) => h('td', { text: r.op }) },
+      { k: 'last', t: 'Last tie', cls: 'l', first: -1, val: (r) => r.l[r.l.length - 1].date, cell: (r) => { const lt = r.l[r.l.length - 1]; return h('td', { class: 'l sub', text: `${fmtDate(lt.date)} ${String(lt.date).slice(0, 4)} · ${lt.round} v ${lt.opp} ${lt.score} (${lt.res})` }); } },
+    ], rows, { k: 'n', dir: -1 }).table),
     h('p', { class: 'note', text: 'Cup ties are counted as won or lost on penalties where a shootout decided them. Cards only where the match report lists them (about a third of ties); penalties are those scored, as the reports rarely record misses.' })));
 }
 
@@ -308,11 +323,15 @@ function penaltyTable(grid) {
   const sel = h('select', { 'aria-label': 'Season', onchange: (e) => { S.penSeason = e.target.value; const y = window.scrollY; render(); window.scrollTo(0, y); } },
     h('option', { value: 'all', selected: pick === 'all', text: `All seasons (${seasons[seasons.length - 1]} on)` }), seasons.map((s2) => h('option', { value: s2, selected: s2 === pick, text: s2 })));
   grid.append(card({ title: 'Penalties by club', span: true, tools: sel }, `${pick === 'all' ? 'Every season since ' + seasons[seasons.length - 1] : pick} · league matches · penalties awarded (scored or missed) · ${tot} in all`,
-    h('div', { class: 'tbl-wrap' }, h('table', null,
-      h('thead', null, h('tr', null, ['Club'].concat(pick === 'all' ? ['Seasons'] : [], ['Played', 'Penalties for', 'Penalties against', 'Difference', 'For a game', 'Against a game']).map((t, i) => h('th', { class: i === 0 ? 'l' : '', text: t })))),
-      h('tbody', null, rows.map((r) => h('tr', { class: r.k === key ? 'focus' : '', style: { cursor: 'default' } },
-        h('td', { class: 'l' }, h('b', { text: r.name })), pick === 'all' ? h('td', { text: r.seasons }) : null, h('td', { text: r.n }),
-        h('td', null, h('b', { text: r.f })), h('td', { text: r.a }), h('td', { class: r.f - r.a < 0 ? 'neg' : '', text: signed(r.f - r.a, 0) }),
-        h('td', { text: (r.f / r.n).toFixed(2) }), h('td', { text: (r.a / r.n).toFixed(2) })))))),
+    h('div', { class: 'tbl-wrap' }, sortTable('penClubs', [
+      { k: 'club', t: 'Club', cls: 'l', first: 1, val: (r) => r.name, cell: (r) => h('td', { class: 'l' }, h('b', { text: r.name })) },
+    ].concat(pick === 'all' ? [{ k: 'seasons', t: 'Seasons', first: -1, val: (r) => r.seasons, cell: (r) => h('td', { text: r.seasons }) }] : [], [
+      { k: 'n', t: 'Played', first: -1, val: (r) => r.n, cell: (r) => h('td', { text: r.n }) },
+      { k: 'f', t: 'Penalties for', first: -1, val: (r) => r.f, cell: (r) => h('td', null, h('b', { text: r.f })) },
+      { k: 'a', t: 'Penalties against', first: -1, val: (r) => r.a, cell: (r) => h('td', { text: r.a }) },
+      { k: 'd', t: 'Difference', first: -1, val: (r) => r.f - r.a, cell: (r) => h('td', { class: r.f - r.a < 0 ? 'neg' : '', text: signed(r.f - r.a, 0) }) },
+      { k: 'fg', t: 'For a game', first: -1, val: (r) => r.f / r.n, cell: (r) => h('td', { text: (r.f / r.n).toFixed(2) }) },
+      { k: 'ag', t: 'Against a game', first: -1, val: (r) => r.a / r.n, cell: (r) => h('td', { text: (r.a / r.n).toFixed(2) }) },
+    ]), rows, { k: 'f', dir: -1 }, (r) => ({ class: r.k === key ? 'focus' : '', style: { cursor: 'default' } })).table),
     h('p', { class: 'note', text: 'From Sportmonks match events (2008/09 on), counted for the club awarded the penalty, whether scored or missed. Penalty shootouts are not included.' })));
 }

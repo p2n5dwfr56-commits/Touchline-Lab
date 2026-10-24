@@ -139,6 +139,24 @@ function compMatches(T, comp = S.comp, venue = S.venue) {
 }
 const hasCups = (T) => (DB.cups || []).some((m) => m.home === T || m.away === T);
 
+// A table whose columns sort when their heading is clicked (again to reverse); blanks always sort last.
+// cols: [{ k, t, cls, tip, val(row) -> number | string | null, first: 1 up / -1 down, cell(row, isSorted) -> <td> }]
+function sortTable(id, cols, rows, def, rowAttrs, tableAttrs) {
+  S.sorts = S.sorts || {};
+  const st = S.sorts[id] && cols.some((c) => c.k === S.sorts[id].k && c.val) ? S.sorts[id] : def;
+  const col = cols.find((c) => c.k === st.k) || cols[0];
+  const blank = (v) => v == null || v === '' || (typeof v === 'number' && !Number.isFinite(v));
+  const sorted = col.val ? rows.slice().sort((a, b) => { const va = col.val(a), vb = col.val(b); if (blank(va) && blank(vb)) return 0; if (blank(va)) return 1; if (blank(vb)) return -1; return (typeof va === 'string' ? va.localeCompare(vb) : va - vb) * st.dir; }) : rows;
+  const table = h('table', tableAttrs || null,
+    h('thead', null, h('tr', null, cols.map((c) => {
+      const on = c.k === col.k && !!c.val;
+      return h('th', { class: [c.cls || '', c.val ? 'sortable' : '', on ? 'sorted' : ''].join(' ').trim(), title: (c.tip ? c.tip + ' · ' : '') + (c.val ? 'Click to sort' : ''), 'aria-sort': on ? (st.dir > 0 ? 'ascending' : 'descending') : null,
+        onclick: c.val ? () => { S.sorts[id] = { k: c.k, dir: on ? -st.dir : c.first || -1 }; const y = window.scrollY; render(); window.scrollTo(0, y); } : null }, c.t, on ? h('span', { class: 'sort-arrow', text: st.dir > 0 ? ' ▲' : ' ▼' }) : null);
+    }))),
+    h('tbody', null, sorted.map((r) => h('tr', rowAttrs ? rowAttrs(r) : { style: { cursor: 'default' } }, cols.map((c) => c.cell(r, c.k === col.k))))));
+  return { table, rows: sorted, key: col.k, dir: st.dir };
+}
+
 const cache = new Map();
 function memo(key, fn) { if (!cache.has(key)) cache.set(key, fn()); return cache.get(key); }
 function leagueAggs() {
