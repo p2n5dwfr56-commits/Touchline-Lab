@@ -357,3 +357,4 @@ td.neg { color: var(--bad); }
 .ref-bar em { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 2px; background: var(--ink); }
 .ref-meter { position: relative; display: inline-block; width: 90px; height: 8px; border-radius: 4px; vertical-align: middle; background: linear-gradient(90deg, var(--good), var(--surface-2) 50%, var(--bad)); opacity: 0.9; }
 .ref-meter i { position: absolute; top: -3px; width: 4px; height: 14px; margin-left: -2px; border-radius: 2px; }
+.ref-table .ref-focus { background: color-mix(in srgb, var(--team-a) 7%, transparent); }

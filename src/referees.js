@@ -114,15 +114,26 @@ function viewReferees(el) {
       .map(([v, l]) => h('div', null, h('b', { text: v }), h('span', { text: l }))))));
 
   const anyPen = refs.some((r) => r.st.np);
-  grid.append(card({ title: 'Every referee', span: true, tools: h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } }, tools, seg([['y', 'Yellows'], ['r', 'Reds']].concat(anyPen ? [['p', 'Penalties']] : [], [['n', 'Matches']]), sortKey, (v) => { S.refSort = v; rerender(); }, 'Sort')) },
+  // The measure chosen above is the highlighted column, with a bar against the average for these referees
+  const M = [['y', 'Yellows a game', (r) => r.st.y, lg.y], ['r', 'Reds a game', (r) => r.st.r, lg.r]].concat(anyPen ? [['p', 'Penalties a game', (r) => (r.st.np >= 10 ? r.st.p : NaN), lg.p]] : []);
+  const focusM = M.find(([k]) => k === sortKey);
+  const cellFor = ([k, , f, avg], r) => {
+    const v = f(r);
+    if (!has(v)) return h('td', { text: '–', title: k === 'p' ? (r.st.np ? `Only ${r.st.np} matches with penalty records` : 'No penalty records') : '' });
+    const tip = k === 'p' ? `${r.st.pens} penalties in ${r.st.np} matches with records` : k === 'r' ? `${r.st.reds} red cards in ${r.st.n} matches` : '';
+    if (!focusM || focusM[0] !== k) return h('td', { text: fmt(v, 2), title: tip || null });
+    return h('td', { class: 'l ref-focus', title: tip || null }, h('b', { text: fmt(v, 2), style: { display: 'inline-block', width: '3em' } }),
+      h('span', { class: 'ref-bar', title: `Average ${fmt(avg, 2)}` }, h('i', { style: { width: Math.min(100, (50 * v) / (avg || 1)) + '%', background: v > avg ? 'var(--bad)' : 'var(--good)' } }), h('em')));
+  };
+  grid.append(card({ title: 'Every referee', span: true, tools: h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } }, tools, seg([['y', 'Yellows'], ['r', 'Reds']].concat(anyPen ? [['p', 'Penalties']] : [], [['n', 'Matches']]), sortKey, (v) => { S.refSort = v; rerender(); }, 'Sort by')) },
     `${who === 'current' ? 'Referees who took a league match this season or last' : 'Referees with no league match in the last two seasons'} · whole careers since 2000/01 · ${minN}+ matches · click a referee for their record with each club`,
     h('div', { class: 'tbl-wrap' }, h('table', { class: 'ref-table' },
-      h('thead', null, h('tr', null, ['Referee', 'Matches', 'Yellows a game', 'Reds a game'].concat(anyPen ? ['Penalties a game'] : []).map((t, i) => h('th', { class: i === 0 || i === 2 ? 'l' : '', text: t })))),
+      h('thead', null, h('tr', null, h('th', { class: 'l', text: 'Referee' }), h('th', { class: sortKey === 'n' ? 'ref-focus' : '', text: 'Matches' + (sortKey === 'n' ? ' ▼' : '') }),
+        M.map(([k, t]) => h('th', { class: k === sortKey ? 'l ref-focus' : '', text: t + (k === sortKey ? ' ▼' : '') })))),
       h('tbody', null, refs.map((r) => h('tr', { class: S.refSel === r.k ? 'focus' : '', onclick: () => { S.refSel = S.refSel === r.k ? null : r.k; rerender(); } },
-        h('td', { class: 'l' }, h('b', { text: name(r.k) })), h('td', { text: r.st.n }),
-        h('td', { class: 'l' }, h('b', { text: fmt(r.st.y, 2), style: { display: 'inline-block', width: '3em' } }), h('span', { class: 'ref-bar', title: `League average ${fmt(lg.y, 2)}` }, h('i', { style: { width: Math.min(100, (50 * r.st.y) / lg.y) + '%', background: r.st.y > lg.y ? 'var(--bad)' : 'var(--good)' } }), h('em'))),
-        h('td', { text: fmt(r.st.r, 2) }), anyPen ? h('td', { text: r.st.np >= 10 ? fmt(r.st.p, 2) : '–', title: r.st.np ? `${r.st.pens} penalties in ${r.st.np} matches with records` : 'No penalty records' }) : null))))),
-    h('p', { class: 'note', text: `Red bars: more yellows than the average for these referees (${fmt(lg.y, 2)} a game, the line in the middle); green: fewer. Card counts rose over the years, so compare current referees with each other. Penalties include missed ones, from match records for 2008/09 onwards. Referees named by football-data.co.uk (none for 2012/13).` })));
+        h('td', { class: 'l' }, h('b', { text: name(r.k) })), h('td', { class: sortKey === 'n' ? 'ref-focus' : '' }, sortKey === 'n' ? h('b', { text: r.st.n }) : String(r.st.n)),
+        M.map((m) => cellFor(m, r))))))),
+    h('p', { class: 'note', text: (focusM ? `Bars: red is above the average for these referees (${fmt(focusM[3], focusM[0] === 'y' ? 2 : 2)} ${focusM[1].toLowerCase()}, the line in the middle), green below. ` : '') + 'Card counts rose over the years, so compare current referees with each other. Penalties include missed ones, from match records for 2008/09 onwards (shown with 10+ matches of records). Referees named by football-data.co.uk (none for 2012/13).' })));
 
   if (S.refSel && byRef[S.refSel]) grid.append(refDetail(S.refSel, byRef[S.refSel], name, lg));
   refClub(grid, L, name, minN);
