@@ -136,26 +136,33 @@ function finBars(box, ys, measures) {
 // Every club's latest year side by side, and wages against league points
 function leagueFinance(grid, key) {
   const P = seasonPositions();
-  const rows = Object.entries(FIN).map(([k, c]) => {
+  // Premiership or Championship clubs: the selected club's league first
+  const leagues = [...new Set(Object.values(FIN).map((c) => c.league || 'Premiership'))];
+  const mine = FIN[key] ? FIN[key].league || 'Premiership' : 'Premiership';
+  const lg = leagues.includes(S.finLeague) ? S.finLeague : mine;
+  const lgTools = leagues.length > 1 ? seg(leagues.map((l) => [l, l]), lg, (v) => { S.finLeague = v; const y = window.scrollY; render(); window.scrollTo(0, y); }, 'League') : null;
+  const rows = Object.entries(FIN).filter(([, c]) => (c.league || 'Premiership') === lg).map(([k, c]) => {
     const ys = finYears(c), full = ys.filter((y) => y.turnover != null && y.preTax != null), plYs = ys.filter((y) => y.turnover != null);
     const y = full[full.length - 1] || plYs[plYs.length - 1] || ys[ys.length - 1]; // the latest year with a full profit and loss account
     if (!y) return null;
-    const s = finSeason(y.yearEnd), lg = P[s] && P[s][k];
-    return { k, c, y, s, lg };
+    const s = finSeason(y.yearEnd), hs = CLUBHIST[k] && CLUBHIST[k].seasons[s];
+    // League finish that season: the full top-flight tables, else the club's own season history (any division)
+    const lgRow = (P[s] && P[s][k]) || (hs && parseInt(hs.pos, 10) && hs.pts != null ? { pos: parseInt(hs.pos, 10), pts: hs.pts, div: hs.division } : null);
+    return { k, c, y, s, lg: lgRow };
   }).filter(Boolean).sort((a, b) => (b.y.turnover || 0) - (a.y.turnover || 0) || a.c.club.localeCompare(b.c.club));
   if (rows.length < 2) return;
-  grid.append(card({ title: 'Premiership clubs compared', span: true }, 'Each club’s latest accounts with a profit and loss account · year ends differ (May or June), so the season shown is the one each year mostly covers', h('div', { class: 'tbl-wrap' }, h('table', null,
+  grid.append(card({ title: lg + ' clubs compared', span: true, tools: lgTools }, 'Each club’s latest accounts with a profit and loss account · year ends differ (May or June), so the season shown is the one each year mostly covers', h('div', { class: 'tbl-wrap' }, h('table', null,
     h('thead', null, h('tr', null, ['Club', 'Year to', 'Turnover', 'Staff costs', 'Wages / turnover', 'Player sales', 'Pre-tax', 'Net assets', 'League that season', 'Staff cost per point'].map((t, i) => h('th', { class: i < 2 ? 'l' : '', text: t })))),
     h('tbody', null, rows.map((r) => h('tr', { class: r.k === key ? 'focus' : '', onclick: () => { const t = DB.teams.find((x) => fbTeamKey(x.name) === r.k); if (t) { S.team = t.id; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); } }, title: 'Show ' + r.c.club },
       h('td', { class: 'l' }, h('b', { text: r.c.club })), h('td', { class: 'l sub', text: fmtYE(r.y.yearEnd) }),
       h('td', { text: money(r.y.turnover) }), h('td', { text: money(r.y.staff) }), h('td', { text: Number.isFinite(ratio(r.y)) ? ratio(r.y).toFixed(0) + '%' : '–' }),
       h('td', { text: money(r.y.playerSales) }), h('td', { class: r.y.preTax != null && r.y.preTax < 0 ? 'neg' : '', text: money(r.y.preTax) }), h('td', { text: money(r.y.netAssets) }),
-      h('td', { class: 'sub', text: r.lg ? `${ordinal(r.lg.pos)} · ${r.lg.pts} pts (${r.s})` : '' }), h('td', { text: r.lg && r.y.staff ? money(r.y.staff / r.lg.pts) : '–' }))))))));
+      h('td', { class: 'sub', text: r.lg ? `${ordinal(r.lg.pos)} · ${r.lg.pts} pts (${r.s}${r.lg.div && !isTopFlight(r.s, r.lg.div) ? ', ' + r.lg.div : ''})` : '' }), h('td', { text: r.lg && r.y.staff ? money(r.y.staff / r.lg.pts) : '–' }))))))));
 
   // Staff costs against league points, latest season each club has both
   const pts = rows.filter((r) => r.lg && r.y.staff);
   if (pts.length >= 4) {
-    const c = card({ title: 'Wages and points', span: true }, 'Staff costs against league points in the season each financial year covers · the line is the trend across clubs');
+    const c = card({ title: 'Wages and points', span: true }, `${lg} clubs · staff costs against league points in the season each financial year covers · the line is the trend across clubs`);
     const W = 900, H = 300, m = { l: 56, r: 16, t: 14, b: 36 };
     const xs = pts.map((r) => r.y.staff), ys = pts.map((r) => r.lg.pts);
     // Staff costs on a log scale: the clubs on £4–20m spread out instead of crowding one corner

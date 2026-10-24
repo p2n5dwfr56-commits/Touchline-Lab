@@ -29,7 +29,7 @@ const PARSE_ONLY = args.includes('--parse-only');
 if (!KEY && !PARSE_ONLY) { console.error('Set your key first, e.g.  COMPANIES_HOUSE_KEY=abc node tools/fetch-companies-house.mjs'); process.exit(1); }
 const YEARS = Number(opt('years', 10));
 const CACHE = opt('cache', 'data/ch-cache');
-const OUT = opt('out', 'data/snapshot/finance-spfl.json');
+const OUT = opt('out', /champ/i.test(opt('league', '')) ? 'data/snapshot/finance-championship.json' : 'data/snapshot/finance-spfl.json');
 mkdirSync(CACHE, { recursive: true });
 
 // The company whose accounts carry each club's figures (the group parent where there is one)
@@ -38,6 +38,9 @@ const CLUBS = [
   ['Motherwell', 'SC005702'], ['Dundee United', 'SC013690'], ['Dundee', 'SC004585'], ['Kilmarnock', 'SC006219'], ['St Mirren', 'SC005773'],
   ['Falkirk', 'SC005854'], ['St Johnstone', 'SC007629']
 ];
+// Scottish Championship clubs (2026/27), set with --league championship
+const CHAMPIONSHIP = [];
+const LEAGUE = /champ/i.test(opt('league', '')) ? 'Championship' : 'Premiership';
 const only = opt('club');
 
 const API = 'https://api.company-information.service.gov.uk';
@@ -261,7 +264,7 @@ function parseFiling(text, meta) {
 async function main() {
   // --retext: read the cached machine-readable pages again (after a change in how they are read)
   if (args.includes('--retext')) readdirSync(CACHE).filter((f) => f.endsWith('.xhtml')).forEach((f) => writeFileSync(join(CACHE, f.replace(/\.xhtml$/, '.txt')), htmlText(readFileSync(join(CACHE, f), 'utf8'))));
-  const clubs = CLUBS.filter(([c]) => !only || c.toLowerCase() === only.toLowerCase());
+  const clubs = (LEAGUE === 'Championship' ? CHAMPIONSHIP : CLUBS).filter(([c]) => !only || c.toLowerCase() === only.toLowerCase());
   const out = [];
   for (const [club, number] of clubs) {
     console.log(`${club} (${number})`);
@@ -322,7 +325,7 @@ async function main() {
       if ((y.approx || []).includes('turnover') && (y.turnover < 1e6 || (med && (y.turnover < med * 0.4 || y.turnover > med * 2.5)))) { y.turnover = null; y.approx = y.approx.filter((k) => k !== 'turnover'); }
       if ((y.approx || []).includes('preTax') && med && Math.abs(y.preTax) > med * 1.5) { y.preTax = null; y.approx = y.approx.filter((k) => k !== 'preTax'); }
     });
-    out.push({ club, company: number, url: `https://find-and-update.company-information.service.gov.uk/company/${number}/filing-history`, years: Object.values(years).filter((y) => ['turnover', 'staff', 'preTax', 'cash', 'netAssets'].some((k) => y[k] != null)).sort((a, b) => b.yearEnd.localeCompare(a.yearEnd)) });
+    out.push({ club, company: number, league: LEAGUE, url: `https://find-and-update.company-information.service.gov.uk/company/${number}/filing-history`, years: Object.values(years).filter((y) => ['turnover', 'staff', 'preTax', 'cash', 'netAssets'].some((k) => y[k] != null)).sort((a, b) => b.yearEnd.localeCompare(a.yearEnd)) });
   }
   writeFileSync(OUT, JSON.stringify({ source: 'touchline-finance', from: 'Companies House annual accounts (Crown copyright, Open Government Licence)', fetched: new Date().toISOString(), clubs: out }, null, 1));
   console.log(`\nWrote ${OUT}: ${out.length} clubs.`);
