@@ -87,6 +87,7 @@ function attachSportmonks(db, b) {
       const id = smPlayerId(db, team, l.name, memo);
       const p = db.players[id] || (db.players[id] = { id, team, name: l.name, num: null, group: SM_GROUP[l.pos] || 'MID', role: null });
       p.team = team; p.group = SM_GROUP[l.pos] || p.group; p.fromLineups = true;
+      ((m.squad = m.squad || {})[team] = m.squad[team] || []).push(id); // the matchday squad, bench included
       if (l.num != null) p.num = l.num;
       const d = l.d || {};
       if (!Object.keys(d).length) return; // unused substitute

@@ -97,6 +97,21 @@ function kpScore(p, a, peers, teamMin, period) {
   return { p, a, metrics, cats, perf, share, areas: Object.keys(cats).length, imp: has(perf) ? perf * k : NaN };
 }
 
+// Who is at the club now: everyone in one of its last three matchday squads (starters and bench) this season.
+// Names match on first initial and surname, since sources spell first names differently ("Dan" / "Daniel").
+const kpNorm = (n) => { const w = String(n || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z\s-]/g, ' ').split(/\s+/).filter(Boolean); return w.length ? w[0][0] + ' ' + w[w.length - 1] : ''; };
+function kpCurrentSquad(T) {
+  const db = SEASONS.real;
+  if (!db || DB !== db) return null;
+  return memo('kpSquad|' + T + '|' + db.matches.length, () => {
+    const ms = db.matches.filter((m) => m.squad && m.squad[T] && m.squad[T].length).sort((a, b) => (a.date || '').localeCompare(b.date || '')).slice(-3);
+    if (ms.length < 3) return null;
+    const names = new Set();
+    ms.forEach((m) => m.squad[T].forEach((pid) => db.players[pid] && names.add(kpNorm(db.players[pid].name))));
+    return { names, from: ms[0].date, to: ms[ms.length - 1].date };
+  });
+}
+
 function viewKey(el) {
   const T = S.team, ms = scoped(T);
   if (!DB.hasPlayers) return missingNote('Key players', 'Player stats', el);
@@ -122,7 +137,16 @@ function viewKey(el) {
     sub = rangeLabel() + ' · ' + ms.length + (ms.length === 1 ? ' match' : ' matches');
   }
   el.append(h('div', { class: 'hero' }, h('h1', { text: teamName(T) }), h('div', { class: 'meta' }, h('span', { text: sub + ' · key players' }))));
-  if (opts.length > 1) el.append(h('div', { class: 'kp-period' }, h('span', { class: 'eyebrow', text: 'Over' }), seg(opts, String(nSeasons), (v) => { S.kpPeriod = v; render(); }, 'Period')));
+  // Current squad only (default), or everyone who played in the period
+  const sq = kpCurrentSquad(T), onlyNow = !!sq && S.kpSquad !== 'all';
+  const gone = onlyNow ? rows.filter((r) => !sq.names.has(kpNorm(r.p.name))) : [];
+  if (onlyNow) { rows = rows.filter((r) => sq.names.has(kpNorm(r.p.name))); all = all.filter((x) => sq.names.has(kpNorm(x.p.name))); }
+  const past = SEASONS.real && DB !== SEASONS.real && DB.season;
+  if (opts.length > 1 || sq || past) el.append(h('div', { class: 'kp-period' },
+    opts.length > 1 ? [h('span', { class: 'eyebrow', text: 'Over' }), seg(opts, String(nSeasons), (v) => { S.kpPeriod = v; render(); }, 'Period')] : null,
+    sq ? [h('span', { class: 'eyebrow', text: 'Players' }), seg([['now', 'Current squad'], ['all', 'Everyone']], onlyNow ? 'now' : 'all', (v) => { S.kpSquad = v; render(); }, 'Players')] : null,
+    past ? h('button', { type: 'button', class: 'ask-chip', onclick: () => { if (loadSeason(SEASONS.real.season)) { S.tab = 'key'; render(); } } }, 'Back to ' + SEASONS.real.season) : null));
+  if (onlyNow && gone.length) el.append(h('p', { class: 'note', style: { margin: '-6px 0 14px' }, text: `Current squad: players in any of the last three matchday squads (${fmtDate(sq.from)} to ${fmtDate(sq.to)}), bench included. Not shown: ${gone.slice(0, 12).map((r) => r.p.name).join(', ')}${gone.length > 12 ? ' and ' + (gone.length - 12) + ' more' : ''}. Pick “Everyone” to include them.` }));
   if (cover) {
     const basic = cover.filter((x) => !x.detail).map((x) => x.season);
     el.append(h('p', { class: 'note', style: { margin: '-6px 0 14px' }, text: `Totals across ${cover.map((x) => seasonShort(x.season)).join(', ')}, compared with every league player over the same seasons.` + (basic.length ? ` ${basic.join(' and ')} ${basic.length > 1 ? 'have' : 'has'} only minutes, goals, assists, cards and goals conceded, so other stats count the detailed seasons only.` : '') + ' Players are matched by club and name, so a player listed under a different spelling in another season counts as two.' }));
@@ -209,7 +233,7 @@ function kpPeriodOptions() {
   if (!DB.season || !(DB === SEASONS.real || DB.pastSeason)) return [];
   const n = kpPlayerSeasons().length;
   if (n < 2) return [];
-  const o = [['1', 'This season']];
+  const o = [['1', SEASONS.real && DB !== SEASONS.real ? DB.season : 'This season']];
   [3, 5, 8, 10].forEach((k) => { if (k < n) o.push([String(k), k + ' seasons']); });
   o.push([String(n), (n > 10 ? 'All ' : '') + n + ' seasons' + (n > 10 ? '' : ' (all)')]);
   return o.filter((x, i, a) => a.findIndex((y) => y[0] === x[0]) === i);
