@@ -367,3 +367,8 @@ td.neg { color: var(--bad); }
 .grade.gA { background: var(--good); } .grade.gB { background: color-mix(in srgb, var(--good) 60%, var(--muted)); }
 .grade.gC { background: var(--muted); } .grade.gD { background: color-mix(in srgb, var(--bad) 60%, var(--muted)); } .grade.gE { background: var(--bad); }
 @media (max-width: 640px) { .tabs button { font-size: 13px; padding: 6px 8px 7px; letter-spacing: 0.03em; } .tab-label { width: 100%; padding-top: 6px; font-size: 10px; } }
+
+th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+th.sortable:hover { color: var(--ink); }
+th.sorted { color: var(--ink); }
+.sort-arrow { font-size: 10px; }

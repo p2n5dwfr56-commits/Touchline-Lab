@@ -373,6 +373,11 @@ td.neg { color: var(--bad); }
 .grade.gA { background: var(--good); } .grade.gB { background: color-mix(in srgb, var(--good) 60%, var(--muted)); }
 .grade.gC { background: var(--muted); } .grade.gD { background: color-mix(in srgb, var(--bad) 60%, var(--muted)); } .grade.gE { background: var(--bad); }
 @media (max-width: 640px) { .tabs button { font-size: 13px; padding: 6px 8px 7px; letter-spacing: 0.03em; } .tab-label { width: 100%; padding-top: 6px; font-size: 10px; } }
+
+th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+th.sortable:hover { color: var(--ink); }
+th.sorted { color: var(--ink); }
+.sort-arrow { font-size: 10px; }
 </style>
 <script>
 'use strict';
@@ -6108,10 +6113,31 @@ function viewManagers(el) {
   // The managers, newest first
   const sel = list.find((s) => s.name + s.start === S.mgrSel) || null;
   const anyRec = list.some((s) => recs.get(s).n);
-  grid.append(card({ title: 'Every manager', span: true }, 'Results from 1994/95 (league) and cup ties where loaded, between appointment and departure · league finishes and trophies at the end of each season in charge · click a manager for detail',
+  // Sortable columns: key, heading, value (null sorts last), first direction (1 up, -1 down)
+  const MCOLS = [
+    ['name', 'Manager', (s) => s.name.split(' ').slice(-1)[0] + ' ' + s.name, 1], ['from', 'From', (s) => s.start, -1], ['to', 'To', (s) => s.to, -1],
+    ['tenure', 'Tenure', (s) => daysBetween(s.start, s.to), -1], ['n', 'P', (s) => recs.get(s).n || null, -1], ['wdl', 'W-D-L', (s) => recs.get(s).n ? recs.get(s).w : null, -1],
+    ['win', 'Win %', (s) => (recs.get(s).n ? recs.get(s).w / recs.get(s).n : null), -1], ['ppg', 'PPG', (s) => (recs.get(s).n ? recs.get(s).ppg : null), -1],
+    ['gd', 'GF–GA / game', (s) => (recs.get(s).n ? (recs.get(s).gf - recs.get(s).ga) / recs.get(s).n : null), -1], ['first10', 'First 10', (s) => (Number.isFinite(recs.get(s).first10) ? recs.get(s).first10 : null), -1],
+    ['best', 'Best finish', (s) => recs.get(s).best, 1], ['trophies', 'Trophies', (s) => recs.get(s).trophies.length || null, -1],
+  ];
+  const msort = S.mgrSort && MCOLS.some(([k]) => k === S.mgrSort.k) ? S.mgrSort : { k: 'from', dir: -1 };
+  const mval = MCOLS.find(([k]) => k === msort.k)[2];
+  const sortedList = list.slice().sort((a, b) => {
+    const va = mval(a), vb = mval(b);
+    if (va == null && vb == null) return b.start.localeCompare(a.start);
+    if (va == null) return 1;
+    if (vb == null) return -1; // blanks last either way
+    return (typeof va === 'string' ? va.localeCompare(vb) : va - vb) * msort.dir || b.start.localeCompare(a.start);
+  });
+  grid.append(card({ title: 'Every manager', span: true }, 'Results between appointment and departure (every match from 1994/95; whole league seasons before) · league finishes and trophies at the end of each season in charge · click a heading to sort, a manager for detail',
     h('div', { class: 'tbl-wrap' }, h('table', null,
-      h('thead', null, h('tr', null, ['Manager', 'From', 'To', 'Tenure', 'P', 'W-D-L', 'Win %', 'PPG', 'GF–GA / game', 'First 10', 'Best finish', 'Trophies'].map((t, i) => h('th', { class: i <= 2 || i === 11 ? 'l' : '', text: t, title: t === 'PPG' ? 'Points per game, 3 for a win' : t === 'First 10' ? 'Points per game in the first 10 matches' : null })))),
-      h('tbody', null, list.slice().reverse().map((s) => {
+      h('thead', null, h('tr', null, MCOLS.map(([k, t, , first], i) => {
+        const on = msort.k === k, tip = t === 'PPG' ? 'Points per game, 3 for a win' : t === 'First 10' ? 'Points per game in the first 10 matches' : null;
+        return h('th', { class: (i <= 2 || i === 11 ? 'l ' : '') + 'sortable' + (on ? ' sorted' : ''), title: (tip ? tip + ' · ' : '') + 'Click to sort', 'aria-sort': on ? (msort.dir > 0 ? 'ascending' : 'descending') : 'none',
+          onclick: () => { S.mgrSort = { k, dir: on ? -msort.dir : first }; const y = window.scrollY; render(); window.scrollTo(0, y); } }, t, on ? h('span', { class: 'sort-arrow', text: msort.dir > 0 ? ' ▲' : ' ▼' }) : null);
+      }))),
+      h('tbody', null, sortedList.map((s) => {
         const r = recs.get(s);
         return h('tr', { class: sel === s ? 'focus' : '', onclick: () => { S.mgrSel = sel === s ? null : s.name + s.start; const y = window.scrollY; render(); window.scrollTo(0, y); }, title: s.approx ? 'Dates known to the year only: no match record' : '' },
           h('td', { class: 'l' }, h('b', { text: s.name }), s.caretaker ? h('span', { class: 'sub', text: ' caretaker' }) : s.joint ? h('span', { class: 'sub', text: ' joint' }) : null),
@@ -6129,7 +6155,7 @@ function viewManagers(el) {
   // Points per game by manager (enough matches to judge)
   const ranked = list.filter((s) => recs.get(s).n >= 15).sort((a, b) => recs.get(b).ppg - recs.get(a).ppg);
   if (ranked.length >= 3) {
-    const c = card({ title: 'Points per game by manager', span: true }, `Managers with 15 or more matches since 1994/95 · league and cup · 3 points a win`);
+    const c = card({ title: 'Points per game by manager', span: true }, `Managers with 15 or more matches counted · league and cup from 1994/95, whole league seasons before · 3 points a win`);
     c.append(h('div', { class: 'mgr-bars' }, ranked.map((s) => {
       const r = recs.get(s);
       return h('div', { class: 'mgr-bar' }, h('span', { class: 'l', text: s.name + (s.spell > 1 && spells.filter((x) => x.name === s.name).length > 1 ? ` (${s.start.slice(0, 4)})` : '') }),
