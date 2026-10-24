@@ -1711,6 +1711,7 @@ function attachCupsFile(db, d) {
     if (!m || m.detail) return;
     const opp = m.home === t.id ? m.away : m.home;
     if (o.scorers) m.wikiScorers = { [t.id]: o.scorers.for || [], [opp]: o.scorers.against || [] };
+    if (o.cards) m.wikiCards = { [t.id]: o.cards.for, [opp]: o.cards.against };
     if (o.stadium) m.info.stadium = o.stadium;
     m.src = 'Wikipedia';
     n++;
@@ -2634,7 +2635,7 @@ const result = (m, T) => {
 };
 const venueOf = (m, T) => (m.neutral ? 'N' : m.home === T ? 'H' : 'A');
 // "Semi-finals" -> "SF", "League Cup" -> "LC" for compact labels
-const roundShort = (r) => { const s = String(r || ''); return /semi/i.test(s) ? 'SF' : /quarter/i.test(s) ? 'QF' : /^final/i.test(s) ? 'Final' : /(round of|last) ?16/i.test(s) ? 'R16' : /group/i.test(s) ? 'Group' : /^(first|second|third|fourth|fifth|sixth) round/i.test(s) ? 'R' + (['first', 'second', 'third', 'fourth', 'fifth', 'sixth'].indexOf(s.split(' ')[0].toLowerCase()) + 1) : s.replace(/^round\s*/i, 'R').slice(0, 8); };
+const roundShort = (r) => { const s = String(r || ''); return /semi/i.test(s) ? 'SF' : /quarter/i.test(s) ? 'QF' : /^final/i.test(s) ? 'Final' : /(round of|last) ?16/i.test(s) ? 'R16' : /group|league phase/i.test(s) ? (/matchday\s*(\d+)/i.test(s) ? 'MD' + s.match(/matchday\s*(\d+)/i)[1] : 'Group') : /^matchday\s*(\d+)/i.test(s) ? 'MD' + s.match(/(\d+)/)[1] : /^(\d)(st|nd|rd|th) round/i.test(s) ? 'R' + s[0] : /play-?off/i.test(s) ? 'PO' : /^(first|second|third|fourth|fifth|sixth) round/i.test(s) ? 'R' + (['first', 'second', 'third', 'fourth', 'fifth', 'sixth'].indexOf(s.split(' ')[0].toLowerCase()) + 1) : s.replace(/^round\s*/i, 'R').slice(0, 8); };
 const compShort = (c) => (/conference/i.test(c) ? 'UECL' : /europa/i.test(c) ? 'UEL' : /champions/i.test(c) ? 'UCL' : String(c || 'Cup').split(/\s+/).map((w) => w[0]).join('').toUpperCase());
 const roundLabel = (m) => (m.cup ? `${compShort(m.comp)} ${roundShort(m.round)}`.trim() : 'R' + m.round);
 const matchLabel = (m, T) => `${roundLabel(m)} v ${teamName(oppOf(m, T))} (${venueOf(m, T)})`;
@@ -6132,10 +6133,10 @@ function leagueManagers(grid, key) {
 
 // "John Rowbotham" and "J Rowbotham" are the same referee: initial and surname
 function refKey(name) {
-  const w = String(name || '').replace(/[^A-Za-z' .-]/g, ' ').replace(/\./g, ' ').split(/\s+/).filter(Boolean);
+  const w = String(name || '').normalize('NFC').replace(/[^\p{L}' .-]/gu, ' ').replace(/\./g, ' ').split(/\s+/).filter(Boolean);
   if (!w.length) return '';
   const sur = w.slice(1).join(' ') || w[0];
-  return (w.length > 1 ? w[0][0].toUpperCase() + ' ' : '') + sur.replace(/\b\w/g, (c) => c.toUpperCase());
+  return (w.length > 1 ? w[0][0].toUpperCase() + ' ' : '') + sur.replace(/(^|[\s'-])(\p{L})/gu, (a, b, c) => b + c.toUpperCase());
 }
 
 // Penalties awarded per match (from Sportmonks events, 2008/09 on), keyed by date and both clubs
@@ -6171,7 +6172,18 @@ function refMatches() {
           hy: has(H.yc) ? H.yc : null, ay: has(A.yc) ? A.yc : null, hr: has(H.rc) ? H.rc : null, ar: has(A.rc) ? A.rc : null, hf: has(H.fls) ? H.fls : null, af: has(A.fls) ? A.fls : null });
       });
     });
-    return { list: out.sort((a, b) => (a.date || '').localeCompare(b.date || '')), full };
+    // A surname on its own ("Beaton") is the initialled referee of that surname who took most matches, when he took
+    // at least 70% of them
+    const n = {};
+    out.forEach((m) => { n[m.ref] = (n[m.ref] || 0) + 1; });
+    const canon = {};
+    Object.keys(n).filter((k) => !k.includes(' ')).forEach((sur) => {
+      const c = Object.keys(n).filter((k) => k.includes(' ') && k.split(' ').slice(1).join(' ') === sur).sort((a, b) => n[b] - n[a]);
+      const tot = c.reduce((t, k) => t + n[k], 0);
+      if (c.length && n[c[0]] >= 0.7 * tot) canon[sur] = c[0];
+    });
+    out.forEach((m) => { if (canon[m.ref]) m.ref = canon[m.ref]; });
+    return { list: out.sort((a, b) => (a.date || '').localeCompare(b.date || '')), full, canon };
   });
 }
 
@@ -6239,6 +6251,8 @@ function viewReferees(el) {
 
   if (S.refSel && byRef[S.refSel]) grid.append(refDetail(S.refSel, byRef[S.refSel], name, lg));
   refClub(grid, L, name, minN);
+  refCups(grid, name, who, last, recent);
+  penaltyTable(grid);
 }
 
 // One referee: cards for and against each club, and how each club fares
@@ -6285,6 +6299,97 @@ function refClub(grid, L, name, minN) {
           h('td', { class: 'l' }, h('span', { class: 'ref-meter', title: r.score > 0.3 ? 'Suspicious…' : r.score < -0.3 ? 'One of ours' : 'Nothing to see here' }, h('i', { style: { left: (50 + 45 * v) + '%', background: v > 0.2 ? 'var(--bad)' : v < -0.2 ? 'var(--good)' : 'var(--muted)' } })), h('span', { class: 'sub', text: r.score > 0.3 ? ' suspicious…' : r.score < -0.3 ? ' one of ours' : ' nothing to see' })));
       }))),
     h('p', { class: 'note', text: 'For fun: a handful of games per referee is a small sample, referees are appointed to matches for reasons (big games get senior referees), and cards follow the fouls. The meter adds our extra yellows, subtracts theirs and subtracts any extra points, each compared with our average with every referee.' }))));
+}
+
+// The selected club's cup ties by referee (Wikipedia match reports: referee, score, scorers and, where listed, cards)
+function refCups(grid, name, who, last, recent) {
+  const key = fbTeamKey(teamName(S.team));
+  const ties = [];
+  allSeasons().forEach((x) => {
+    const db = x.current ? SEASONS.real || x.db : x.db || seasonDB(x.season);
+    if (!db || !db.cups) return;
+    const t = db.teams.find((z) => fbTeamKey(z.name) === key);
+    if (!t) return;
+    const nm = (id) => (db.teamById && db.teamById[id] ? db.teamById[id].name : id);
+    db.cups.forEach((m) => {
+      if (!(m.home === t.id || m.away === t.id) || !m.info || !m.info.ref) return;
+      const O = m.home === t.id ? m.away : m.home, wc = m.wikiCards || null, ws = m.wikiScorers || null;
+      const pens = (id) => (ws && ws[id] ? ws[id].filter((g) => /\(p\)/.test(g)).length : null);
+      ties.push({ season: x.season, date: m.date, ref: refKey(m.info.ref), res: result(m, t.id), opp: nm(O), round: roundLabel(m), score: `${goalsFor(m, t.id)}–${goalsAg(m, t.id)}${m.pens ? ' p' : ''}`,
+        y: wc && wc[t.id] ? wc[t.id].y : null, oy: wc && wc[O] ? wc[O].y : null, r: wc && wc[t.id] ? wc[t.id].r : null, or: wc && wc[O] ? wc[O].r : null, p: pens(t.id), op: pens(O) });
+    });
+  });
+  if (ties.length < 5) return;
+  ties.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  // A report giving the surname only ("McLean") is the league referee of that surname, when there is just one
+  const { canon } = refMatches();
+  ties.forEach((t) => { if (canon[t.ref]) t.ref = canon[t.ref]; });
+  // The same current/retired split as the league tables (a referee seen only in cup ties counts by his last tie)
+  const lastAny = { ...last };
+  ties.forEach((t) => { if (!lastAny[t.ref] || t.season > lastAny[t.ref]) lastAny[t.ref] = t.season; });
+  const mine = ties.filter((t) => recent.has(lastAny[t.ref]) === (who === 'current'));
+  const by = {};
+  mine.forEach((t) => (by[t.ref] = by[t.ref] || []).push(t));
+  const rows = Object.entries(by).map(([k, l]) => {
+    const w = l.filter((t) => t.res === 'W').length, d = l.filter((t) => t.res === 'D').length, cards = l.filter((t) => t.y != null);
+    return { k, l, w, d, lo: l.length - w - d, y: cards.reduce((s, t) => s + t.y, 0), oy: cards.reduce((s, t) => s + t.oy, 0), r: cards.reduce((s, t) => s + t.r, 0), or: cards.reduce((s, t) => s + t.or, 0), nc: cards.length, p: l.reduce((s, t) => s + (t.p || 0), 0), op: l.reduce((s, t) => s + (t.op || 0), 0) };
+  }).sort((a, b) => b.l.length - a.l.length || a.k.localeCompare(b.k));
+  if (!rows.length) return;
+  grid.append(card({ title: `${teamName(S.team)} in cup ties`, span: true }, `${mine.length} cup ties with ${who === 'current' ? 'current' : 'retired'} referees · Scottish Cup, League Cup, Europe and others · from Wikipedia match reports (2010/11 on)`,
+    h('div', { class: 'tbl-wrap' }, h('table', null,
+      h('thead', null, h('tr', null, ['Referee', 'Ties', 'W-D-L', 'Win %', 'Cards: us / them', 'Penalties scored: us / them', 'Last tie'].map((t, i) => h('th', { class: i === 0 || i === 6 ? 'l' : '', text: t })))),
+      h('tbody', null, rows.map((r) => { const lt = r.l[r.l.length - 1];
+        return h('tr', { style: { cursor: 'default' } }, h('td', { class: 'l' }, h('b', { text: name(r.k) })), h('td', { text: r.l.length }), h('td', { text: `${r.w}-${r.d}-${r.lo}` }),
+          h('td', { class: r.w / r.l.length < 0.4 ? 'neg' : '', text: Math.round((100 * r.w) / r.l.length) + '%' }),
+          h('td', { title: r.nc ? `Yellows ${r.y} / ${r.oy}, reds ${r.r} / ${r.or}, in ${r.nc} ties with cards listed` : 'No cards listed for these ties', text: r.nc ? `${r.y + r.r} / ${r.oy + r.or}` : '–' }),
+          h('td', { text: `${r.p} / ${r.op}` }), h('td', { class: 'l sub', text: `${fmtDate(lt.date)} ${String(lt.date).slice(0, 4)} · ${lt.round} v ${lt.opp} ${lt.score} (${lt.res})` }));
+      })))),
+    h('p', { class: 'note', text: 'Cup ties are counted as won or lost on penalties where a shootout decided them. Cards only where the match report lists them (about a third of ties); penalties are those scored, as the reports rarely record misses.' })));
+}
+
+// Penalties awarded for and against each club in a season (all league matches with penalty records, 2008/09 on)
+function penaltyTable(grid) {
+  const PI = penIndex();
+  if (!PI.seasons || !PI.seasons.size) return;
+  const per = memo('penTable|' + allSeasons().length + '|' + (SEASONS.real ? SEASONS.real.matches.length : 0), () => {
+    const out = {};
+    allSeasons().forEach((x) => {
+      if (!PI.seasons.has(x.season)) return;
+      const db = x.current ? SEASONS.real || x.db : x.db || seasonDB(x.season);
+      if (!db || !db.matches) return;
+      const nm = (id) => (db.teamById && db.teamById[id] ? db.teamById[id].name : id);
+      const T = (out[x.season] = {});
+      db.matches.forEach((m) => {
+        if (!m.date) return;
+        const hk = fbTeamKey(nm(m.home)), ak = fbTeamKey(nm(m.away));
+        const p = [0, -1, 1].map((n) => PI[shiftDay(m.date.slice(0, 10), n) + '|' + hk + '|' + ak]).find(Boolean) || [0, 0];
+        [[hk, nm(m.home), p[0], p[1]], [ak, nm(m.away), p[1], p[0]]].forEach(([k, n, f, a]) => { const r = (T[k] = T[k] || { name: n, n: 0, f: 0, a: 0 }); r.n++; r.f += f; r.a += a; });
+      });
+    });
+    return out;
+  });
+  const seasons = Object.keys(per).sort().reverse();
+  if (!seasons.length) return;
+  const pick = S.penSeason === 'all' || seasons.includes(S.penSeason) ? S.penSeason : seasons[0];
+  // One season, or every season added up
+  const rowsOf = (sel) => {
+    if (sel !== 'all') return Object.entries(per[sel]).map(([k, r]) => ({ k, ...r }));
+    const agg = {};
+    seasons.forEach((s2) => Object.entries(per[s2]).forEach(([k, r]) => { const a = (agg[k] = agg[k] || { k, name: r.name, n: 0, f: 0, a: 0, seasons: 0 }); a.n += r.n; a.f += r.f; a.a += r.a; a.seasons++; }));
+    return Object.values(agg);
+  };
+  const rows = rowsOf(pick).sort((a, b) => b.f - a.f || a.a - b.a || a.name.localeCompare(b.name));
+  const key = fbTeamKey(teamName(S.team)), tot = rows.reduce((t, r) => t + r.f, 0);
+  const sel = h('select', { 'aria-label': 'Season', onchange: (e) => { S.penSeason = e.target.value; const y = window.scrollY; render(); window.scrollTo(0, y); } },
+    h('option', { value: 'all', selected: pick === 'all', text: `All seasons (${seasons[seasons.length - 1]} on)` }), seasons.map((s2) => h('option', { value: s2, selected: s2 === pick, text: s2 })));
+  grid.append(card({ title: 'Penalties by club', span: true, tools: sel }, `${pick === 'all' ? 'Every season since ' + seasons[seasons.length - 1] : pick} · league matches · penalties awarded (scored or missed) · ${tot} in all`,
+    h('div', { class: 'tbl-wrap' }, h('table', null,
+      h('thead', null, h('tr', null, ['Club'].concat(pick === 'all' ? ['Seasons'] : [], ['Played', 'Penalties for', 'Penalties against', 'Difference', 'For a game', 'Against a game']).map((t, i) => h('th', { class: i === 0 ? 'l' : '', text: t })))),
+      h('tbody', null, rows.map((r) => h('tr', { class: r.k === key ? 'focus' : '', style: { cursor: 'default' } },
+        h('td', { class: 'l' }, h('b', { text: r.name })), pick === 'all' ? h('td', { text: r.seasons }) : null, h('td', { text: r.n }),
+        h('td', null, h('b', { text: r.f })), h('td', { text: r.a }), h('td', { class: r.f - r.a < 0 ? 'neg' : '', text: signed(r.f - r.a, 0) }),
+        h('td', { text: (r.f / r.n).toFixed(2) }), h('td', { text: (r.a / r.n).toFixed(2) })))))),
+    h('p', { class: 'note', text: 'From Sportmonks match events (2008/09 on), counted for the club awarded the penalty, whether scored or missed. Penalty shootouts are not included.' })));
 }
 'use strict';
 /* =====================================================================

@@ -54,7 +54,8 @@ function penaltyList() {
     try { b = JSON.parse(readFileSync(f, 'utf8')); } catch (e) { continue; }
     if (!b || b.source !== 'sportmonks' || !b.season || parseInt(b.season.name, 10) < 2008) continue;
     const evs = b.fixtures.reduce((t, x) => t + (x.events || []).length, 0);
-    if (evs < 1000) continue; // a season without match events
+    const played = b.fixtures.filter((x) => x.score).length;
+    if (!played || evs < 5 * played) continue; // a season without (enough) match events
     const y = parseInt(b.season.name, 10);
     seasons.push(y + '/' + String((y + 1) % 100).padStart(2, '0'));
     // Only matches with a penalty are listed; every other match in a covered season had none

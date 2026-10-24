@@ -95,6 +95,7 @@ function attachCupsFile(db, d) {
     if (!m || m.detail) return;
     const opp = m.home === t.id ? m.away : m.home;
     if (o.scorers) m.wikiScorers = { [t.id]: o.scorers.for || [], [opp]: o.scorers.against || [] };
+    if (o.cards) m.wikiCards = { [t.id]: o.cards.for, [opp]: o.cards.against };
     if (o.stadium) m.info.stadium = o.stadium;
     m.src = 'Wikipedia';
     n++;

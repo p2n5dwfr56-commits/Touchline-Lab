@@ -125,7 +125,7 @@ const result = (m, T) => {
 };
 const venueOf = (m, T) => (m.neutral ? 'N' : m.home === T ? 'H' : 'A');
 // "Semi-finals" -> "SF", "League Cup" -> "LC" for compact labels
-const roundShort = (r) => { const s = String(r || ''); return /semi/i.test(s) ? 'SF' : /quarter/i.test(s) ? 'QF' : /^final/i.test(s) ? 'Final' : /(round of|last) ?16/i.test(s) ? 'R16' : /group/i.test(s) ? 'Group' : /^(first|second|third|fourth|fifth|sixth) round/i.test(s) ? 'R' + (['first', 'second', 'third', 'fourth', 'fifth', 'sixth'].indexOf(s.split(' ')[0].toLowerCase()) + 1) : s.replace(/^round\s*/i, 'R').slice(0, 8); };
+const roundShort = (r) => { const s = String(r || ''); return /semi/i.test(s) ? 'SF' : /quarter/i.test(s) ? 'QF' : /^final/i.test(s) ? 'Final' : /(round of|last) ?16/i.test(s) ? 'R16' : /group|league phase/i.test(s) ? (/matchday\s*(\d+)/i.test(s) ? 'MD' + s.match(/matchday\s*(\d+)/i)[1] : 'Group') : /^matchday\s*(\d+)/i.test(s) ? 'MD' + s.match(/(\d+)/)[1] : /^(\d)(st|nd|rd|th) round/i.test(s) ? 'R' + s[0] : /play-?off/i.test(s) ? 'PO' : /^(first|second|third|fourth|fifth|sixth) round/i.test(s) ? 'R' + (['first', 'second', 'third', 'fourth', 'fifth', 'sixth'].indexOf(s.split(' ')[0].toLowerCase()) + 1) : s.replace(/^round\s*/i, 'R').slice(0, 8); };
 const compShort = (c) => (/conference/i.test(c) ? 'UECL' : /europa/i.test(c) ? 'UEL' : /champions/i.test(c) ? 'UCL' : String(c || 'Cup').split(/\s+/).map((w) => w[0]).join('').toUpperCase());
 const roundLabel = (m) => (m.cup ? `${compShort(m.comp)} ${roundShort(m.round)}`.trim() : 'R' + m.round);
 const matchLabel = (m, T) => `${roundLabel(m)} v ${teamName(oppOf(m, T))} (${venueOf(m, T)})`;

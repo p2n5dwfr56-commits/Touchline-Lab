@@ -292,5 +292,6 @@ A light-hearted tab built on the referee named for each league match in the foot
 missed) from the Sportmonks match events, 2008/09 on (the snapshot keeps only matches with a penalty and the
 seasons covered). Current referees (a league match this season or last) and retired ones are listed apart,
 each over their whole career: yellows, reds and penalties a game, four "awards", one referee's record with
-each club, and sets the selected club's results and cards with
+each club, the selected club's cup ties by referee (Wikipedia match reports: result, cards where listed,
+penalties scored), a penalties-for-and-against table per club and season, and sets the selected club's results and cards with
 each referee against its own average (the "conspiracy meter"). Names are matched on initial and surname.

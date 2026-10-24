@@ -62,6 +62,9 @@ function scorers(cellHtml) {
   });
 }
 
+// Card icons in one side's cell: every booking, and reds (straight or second booking)
+const cardsIn = (cell) => { const c = String(cell || ''); return { y: (c.match(/title="Booked"/g) || []).length, r: (c.match(/title="Sent off/g) || []).length }; };
+
 function parse(html) {
   const out = [];
   // Walk headings and match boxes in page order, so each box knows its competition and section
@@ -76,7 +79,7 @@ function parse(html) {
     const date = isoDate(text(c1[0]));
     // The box's own round label, with the section it sits in when that label is only a leg or matchday
     let round = text(c1[0]).replace(/^.*?\d{4}\s*/, '').replace(/\n/g, ' ').trim();
-    if (/^\d+$/.test(round)) round = 'Matchday ' + round;
+    if (/^\d+$/.test(round)) round = (/group|league phase|league stage/i.test(sub) ? 'Matchday ' : 'Round ') + round; // a bare number: a group matchday, or a knockout round
     if (!round) round = sub;
     else if (sub && /leg|^matchday/i.test(round) && !round.toLowerCase().includes(sub.toLowerCase())) round = sub + ' · ' + round;
     const home = text(c1[1]), away = text(c1[3]), score = text(c1[2]);
@@ -99,6 +102,8 @@ function parse(html) {
       pens: pm ? (homeIsUs ? { f: +pm[1], a: +pm[2] } : { f: +pm[2], a: +pm[1] }) : null,
       att: Number.isFinite(att) ? att : null, ref: (info.match(/Referee:\s*([^\n(]+)/i) || [])[1]?.trim() || '', stadium: venueName.trim(),
       scorers: { for: scorers(homeIsUs ? c2[1] : c2[3]), against: scorers(homeIsUs ? c2[3] : c2[1]) },
+      // Bookings and red cards, where the box lists them (a box with no card icons at all is left without)
+      ...(/title="(Booked|Sent off)/.test(m[0]) ? { cards: { for: cardsIn(homeIsUs ? c2[1] : c2[3]), against: cardsIn(homeIsUs ? c2[3] : c2[1]) } } : {}),
     });
   }
   return out;
