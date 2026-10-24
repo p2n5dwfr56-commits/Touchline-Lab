@@ -11,7 +11,7 @@ the full work when a Premiership match has finished since the data's date.
 
 1. **Repository.** Work in the Touchline-Lab checkout (`p2n5dwfr56-commits/Touchline-Lab`). If the session
    has none, run `git clone https://github.com/p2n5dwfr56-commits/Touchline-Lab` (public), or attach it with `add_repo`.
-   Run `npm`-free: the tools need only Node and the pre-installed Playwright. All commands below run from its root.
+   No `npm install` is needed: the tools use only Node and the pre-installed Playwright. All commands below run from its root.
 2. **Token.** If `SPORTMONKS_TOKEN` is empty, stop and say: "Scheduled update skipped: add SPORTMONKS_TOKEN
    to the environment settings." Never ask for the token in the conversation.
 3. **Anything new?** Read `manifest.json` from the data store (`Artifact` action `read`, `url` = data store,
