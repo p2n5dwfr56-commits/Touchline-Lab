@@ -35,7 +35,7 @@ function seasonDB(season) {
   prepareDB(db);
   e.layers.forEach((l) => { try { applyLayerJSON(db, l.name, JSON.parse(l.text)); } catch (err) { /* skip a damaged file */ } });
   // Built-in older seasons carry player season totals instead of every match
-  if (e.summary && !e.layers.length) {
+  if (e.summary && !hasSmLayer(e)) {
     db.seasonPS = {};
     Object.entries(e.summary).forEach(([id, x]) => { if (!db.teamById[x.team]) return; db.players[id] = { id, team: x.team, name: x.name, group: x.group, role: x.role, num: x.num }; db.seasonPS[id] = x.a; });
     db.hasPlayers = Object.keys(db.players).length > 0;
@@ -54,6 +54,8 @@ function allSeasons() {
   SEASONS.list.forEach((e) => { if (!SEASONS.real || e.season !== SEASONS.real.season) out.push({ season: e.season, entry: e }); });
   return out.sort((a, b) => b.season.localeCompare(a.season));
 }
+// Whether a season's files include Sportmonks line-ups (other files, such as Wikipedia results, add no player stats)
+const hasSmLayer = (e) => (e.layers || []).some((l) => /"source"\s*:\s*"sportmonks"/.test(String(l.text).slice(0, 300)));
 function loadSeason(season) {
   const db = SEASONS.real && SEASONS.real.season === season ? SEASONS.real : seasonDB(season);
   if (!db) return false;

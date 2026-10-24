@@ -99,7 +99,7 @@ function importFootballData(csvFiles) {
       s.n = 1; s.g = T === H ? x.hg : x.ag; s.ga = T === H ? x.ag : x.hg;
       s.w = s.g > s.ga ? 1 : 0; s.d = s.g === s.ga ? 1 : 0; s.l = s.g < s.ga ? 1 : 0; s.pts = 3 * s.w + s.d;
       s.sh = num(x.stat[me + 'S']); s.sha = num(x.stat[op + 'S']); s.sot = num(x.stat[me + 'ST']);
-      s.cor = num(x.stat[me + 'C']); s.fls = num(x.stat[me + 'F']); s.yc = num(x.stat[me + 'Y']);
+      s.cor = num(x.stat[me + 'C']); s.fls = num(x.stat[me + 'F']); s.yc = num(x.stat[me + 'Y']); s.rc = num(x.stat[me + 'R']);
       s.xg = num(x.stat[me + 'xG']); s.xga = num(x.stat[op + 'xG']); // xG columns appear in recent seasons only
       s.mxp = T === H ? 3 * pH + pD : 3 * pA + pD;
       ts[T] = s;

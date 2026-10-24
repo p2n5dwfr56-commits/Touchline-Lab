@@ -227,7 +227,7 @@ function viewKey(el) {
 const KP_MIN_PERIOD = 600;
 // Seasons with player stats, newest first, from the season on screen back
 function kpPlayerSeasons() {
-  return allSeasons().filter((x) => x.season <= (DB.season || '9999')).filter((x) => (x.current ? x.db.hasPlayers : x.entry.layers.length || x.entry.summary));
+  return allSeasons().filter((x) => x.season <= (DB.season || '9999')).filter((x) => (x.current ? x.db.hasPlayers : hasSmLayer(x.entry) || x.entry.summary));
 }
 function kpPeriodOptions() {
   if (!DB.season || !(DB === SEASONS.real || DB.pastSeason)) return [];

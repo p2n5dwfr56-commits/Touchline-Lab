@@ -665,6 +665,8 @@ function teamBasics(grid, T, ms) {
 function matchGoals(m) {
   const tl = (m.timeline || []).filter((e) => e.kind === 'goal');
   if (tl.length) return tl.map((e) => ({ team: e.team, bm: e.bm != null ? e.bm : e.min, min: e.min }));
+  // Scorers from Wikipedia ("Nisbet 45+2'", "Smith 12' (p)"): the minute before stoppage time counts
+  if (m.wikiScorers) return Object.entries(m.wikiScorers).flatMap(([team, xs]) => xs.map((x) => { const q = String(x).match(/(\d+)(?:\+(\d+))?'/); return q ? { team, bm: +q[1], min: +q[1] + (+q[2] || 0) } : null; }).filter(Boolean));
   if (m.events && m.events.length) return m.events.filter((e) => e.type === 'shot' && e.out === 'goal' && e.per <= 4).concat(m.ogs || []).map((e) => {
     const raw = Math.floor(e.t / 60) + 1, cap = { 1: 45, 2: 90, 3: 105, 4: 120 }[e.per];
     return { team: e.team, bm: Math.min(cap, raw), min: raw };
@@ -672,7 +674,7 @@ function matchGoals(m) {
   return [];
 }
 // A match counts when we know its goal times: it has a timeline or events, and the goals add up
-const timedMatch = (m) => { const g = matchGoals(m); return g.length === m.hg + m.ag && ((m.timeline && m.timeline.length) || (m.events && m.events.length) || g.length); };
+const timedMatch = (m) => { const g = matchGoals(m); return g.length === m.hg + m.ag && ((m.timeline && m.timeline.length) || (m.events && m.events.length) || m.wikiScorers || g.length); };
 const G_WIN = [['1', "0–15'", 1, 15], ['16', "16–30'", 16, 30], ['31', "31–45'", 31, 45], ['46', "46–60'", 46, 60], ['61', "61–75'", 61, 75], ['76', "76–90'", 76, 90], ['h1', '1st half', 1, 45], ['h2', '2nd half', 46, 90], ['l30', "Last 30'", 61, 90]];
 const inWin = (bm, w) => (w[3] === 90 ? bm >= w[2] && bm <= 130 : bm >= w[2] && bm <= w[3]); // late windows take stoppage and extra time
 function goalSplit(ms, T, w) {

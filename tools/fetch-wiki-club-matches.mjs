@@ -8,6 +8,10 @@
 
     node tools/fetch-wiki-club-matches.mjs --club Aberdeen --season 2026
     node tools/fetch-wiki-club-matches.mjs --club Aberdeen --season 2026 --html saved-api-response.json
+    node tools/fetch-wiki-club-matches.mjs --club Aberdeen --season 2015 --league   # league games too (goal times)
+
+  With --league the league matches are kept as well (comp "League"): Touchline Lab adds their scorers and
+  goal minutes to the league results it already has, for goal timing and head-to-head analysis.
 
   Text from Wikipedia is CC BY-SA 4.0; the output keeps the article as its source.
 */
@@ -34,7 +38,7 @@ function compOf(h) {
   if (/scottish cup/i.test(h)) return 'Scottish Cup';
   if (/challenge cup/i.test(h)) return 'Challenge Cup';
   if (/champions league|europa|conference|uefa|europe/i.test(h)) return h.replace(/^UEFA\s+/i, '').trim();
-  return null; // the league
+  return args.includes('--league') && /league|premier|division|championship/i.test(h) ? 'League' : null; // the league, when asked for
 }
 // Scorers in a box cell, one player per line: only the goal markers count (bookings and red cards sit
 // alongside them). "Nisbet ⚽ 35' (pen.), 76'" -> ["Nisbet 35' (p)", "Nisbet 76'"]
@@ -113,11 +117,11 @@ async function main() {
     if (!html) throw new Error('Wikipedia kept refusing (too many requests); try again later');
   }
   const matches = parse(html);
-  if (!matches.length) throw new Error('No played cup matches found on the page.');
+  if (!matches.length) throw new Error('No played matches found on the page (older articles list results in tables without match boxes).');
   const out = opt('out', `cups-${club.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${y}.json`);
   writeFileSync(out, JSON.stringify({ source: 'touchline-cups', club, season, from: 'Wikipedia: ' + page + ' (CC BY-SA 4.0)', url: 'https://en.wikipedia.org/wiki/' + encodeURIComponent(page.replace(/ /g, '_')), fetched: new Date().toISOString(), matches }, null, 1));
   const by = {};
   matches.forEach((x) => (by[x.comp] = (by[x.comp] || 0) + 1));
-  console.log(`Wrote ${out}: ${matches.length} cup matches (${Object.entries(by).map(([k, v]) => v + ' ' + k).join(', ')}).`);
+  console.log(`Wrote ${out}: ${matches.length} matches (${Object.entries(by).map(([k, v]) => v + ' ' + k).join(', ')}).`);
 }
 main().catch((e) => { console.error(e.message); process.exit(1); });

@@ -82,6 +82,15 @@ function attachCupsFile(db, d) {
   let n = 0;
   d.matches.forEach((o) => {
     if (!o.date || o.gf == null || o.ga == null) return;
+    if (o.comp === 'League') { // a league game already loaded: add its scorers (goal minutes), crowd and referee
+      const opp = db.teams.find((x) => fbTeamKey(x.name) === fbTeamKey(o.opp));
+      const lm = opp && db.matches.find((x) => x.date && fbDays(x.date, o.date) <= 1 && [x.home, x.away].includes(t.id) && [x.home, x.away].includes(opp.id));
+      if (!lm || goalsFor(lm, t.id) !== o.gf || goalsAg(lm, t.id) !== o.ga) return; // only when the score agrees
+      if (!(lm.timeline && lm.timeline.length) && o.scorers) lm.wikiScorers = { [t.id]: o.scorers.for || [], [opp.id]: o.scorers.against || [] };
+      lm.info = { ...(lm.info || {}), att: (lm.info && lm.info.att) || o.att || null, ref: (lm.info && lm.info.ref) || o.ref || '' };
+      n++;
+      return;
+    }
     const m = addCupMatch(db, t.id, o);
     if (!m || m.detail) return;
     const opp = m.home === t.id ? m.away : m.home;

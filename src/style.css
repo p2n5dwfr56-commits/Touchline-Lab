@@ -81,7 +81,7 @@ main { padding-block: 20px 60px; }
 .grid.three { grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
 .stack { display: flex; flex-direction: column; gap: 16px; }
 .card { background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius); padding: 16px; min-width: 0; }
-.card.span { grid-column: 1 / -1; }
+.card.span, .grid > .span { grid-column: 1 / -1; }
 .card-h { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
 .card-h h2 { margin: 0; font-family: var(--font-display); font-size: 19px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; line-height: 1.1; text-wrap: balance; }
 .card-h p, .sub { margin: 3px 0 0; color: var(--muted); font-size: 13px; }
@@ -328,3 +328,14 @@ textarea { width: 100%; font-family: var(--font-mono); font-size: 12px; line-hei
 .att-chip i { width: 10px; height: 10px; border-radius: 50%; border: 2px solid; flex: none; }
 .att-chip[aria-pressed="true"] { color: var(--ink); border-color: var(--ink-2); font-weight: 600; }
 .att-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; vertical-align: 0; }
+
+/* Head-to-head history */
+.h2h-strip { display: flex; flex-wrap: wrap; gap: 3px; }
+.h2h-strip span { width: 12px; height: 18px; border-radius: 3px; background: var(--muted); }
+.h2h-strip span.W { background: var(--good); }
+.h2h-strip span.L { background: var(--bad); }
+.h2h-strip span:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.h2h-list { max-height: 420px; overflow-y: auto; }
+.h2h-disc { width: 100%; }
+.h2h-disc td, .h2h-disc th { padding: 6px 8px; }
+.bar-val { font-size: 11px; fill: var(--ink-2); }

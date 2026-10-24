@@ -44,7 +44,7 @@ function smCupMatch(db, b, f, typeOf) {
     const won = s.g > s.ga || (s.g === s.ga && pens && (T === H ? pens.f > pens.a : pens.a > pens.f));
     s.w = won ? 1 : 0; s.l = s.g < s.ga || (s.g === s.ga && pens && !won) ? 1 : 0; s.d = s.w || s.l ? 0 : 1; s.pts = 3 * s.w + s.d;
     s.sh = stat(me, 'Shots Total'); s.sha = stat(op, 'Shots Total'); s.sot = stat(me, 'Shots On Target');
-    s.cor = stat(me, 'Corners'); s.fls = stat(me, 'Fouls'); s.yc = stat(me, 'Yellowcards');
+    s.cor = stat(me, 'Corners'); s.fls = stat(me, 'Fouls'); s.yc = stat(me, 'Yellowcards'); s.rc = stat(me, 'Redcards');
     ts[T] = s;
   });
   const venue = f.venue || '';
