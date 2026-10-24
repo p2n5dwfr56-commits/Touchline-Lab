@@ -6,3 +6,4 @@ data/snapshot/
 dist/index-snapshot.html
 data/sample/
 statsbomb-*.json
+data/ch-cache/

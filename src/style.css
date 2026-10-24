@@ -339,3 +339,5 @@ textarea { width: 100%; font-family: var(--font-mono); font-size: 12px; line-hei
 .h2h-disc { width: 100%; }
 .h2h-disc td, .h2h-disc th { padding: 6px 8px; }
 .bar-val { font-size: 11px; fill: var(--ink-2); }
+
+td.neg { color: var(--bad); }
