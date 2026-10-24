@@ -1,5 +1,5 @@
 // Prints `const SNAPSHOT = {...};` for build.sh: a bundled data snapshot the app loads when the viewer has no saved imports.
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { seasonSummary } from './season-summary.mjs';
 const dir = process.argv[2];
@@ -44,6 +44,30 @@ const snap = {
     summary: (p.summarise || []).some((f) => existsSync(join(dir, f))) ? nonEmpty(seasonSummary(readFileSync(join(dir, p.files[0]), 'utf8'), p.summarise.filter((f) => existsSync(join(dir, f))).map((f) => readFileSync(join(dir, f), 'utf8')))) : undefined })),
 };
 // Escape "<" so file contents can never close the surrounding <script>
+// Penalties awarded in each league match (scored or missed), from the Sportmonks match events: a compact list the
+// Ref Watch tab joins to the results by date and teams. Seasons before 2008/09 do not record missed penalties.
+function penaltyList() {
+  const files = [].concat(existsSync(join(dir, 'past')) ? readdirSync(join(dir, 'past')).filter((f) => /^sportmonks-.*\.json$/.test(f)).map((f) => join(dir, 'past', f)) : [], (m.layers || []).filter((f) => /sportmonks/.test(f)).map((f) => join(dir, f)));
+  const out = [], seasons = [];
+  for (const f of files) {
+    let b;
+    try { b = JSON.parse(readFileSync(f, 'utf8')); } catch (e) { continue; }
+    if (!b || b.source !== 'sportmonks' || !b.season || parseInt(b.season.name, 10) < 2008) continue;
+    const evs = b.fixtures.reduce((t, x) => t + (x.events || []).length, 0);
+    if (evs < 1000) continue; // a season without match events
+    const y = parseInt(b.season.name, 10);
+    seasons.push(y + '/' + String((y + 1) % 100).padStart(2, '0'));
+    // Only matches with a penalty are listed; every other match in a covered season had none
+    b.fixtures.forEach((x) => {
+      if (!x.score || !x.home || !x.away) return;
+      const pen = (id) => (x.events || []).filter((e) => (e.type === 'Penalty' || e.type === 'Missed Penalty') && e.team === id).length;
+      const ph = pen(x.home.id), pa = pen(x.away.id);
+      if (ph + pa) out.push([String(x.date).slice(0, 10), x.home.name, x.away.name, ph, pa]);
+    });
+  }
+  return { seasons: [...new Set(seasons)].sort(), m: out };
+}
+snap.penalties = penaltyList();
 process.stdout.write('const SNAPSHOT = ' + JSON.stringify(snap).replace(/</g, '\\u003c') + ';\n');
 // Optional StatsBomb sample (a file from tools/fetch-statsbomb.mjs), for the event-data views
 if (m.sample) {

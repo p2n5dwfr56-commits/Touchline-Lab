@@ -288,7 +288,9 @@ manager in charge when each season ended. Spells dated to the year only get no m
 
 ## Ref Watch
 A light-hearted tab built on the referee named for each league match in the football-data.co.uk files
-(2000/01 on; none for 2012/13), now kept by the importer and the snapshot. For a chosen span of seasons it
-ranks referees by yellows, reds, fouls and home win rate against the league average, hands out three
-"awards", shows one referee's record with each club, and sets the selected club's results and cards with
+(2000/01 on; none for 2012/13), now kept by the importer and the snapshot, plus penalties awarded (scored or
+missed) from the Sportmonks match events, 2008/09 on (the snapshot keeps only matches with a penalty and the
+seasons covered). Current referees (a league match this season or last) and retired ones are listed apart,
+each over their whole career: yellows, reds and penalties a game, four "awards", one referee's record with
+each club, and sets the selected club's results and cards with
 each referee against its own average (the "conspiracy meter"). Names are matched on initial and surname.
