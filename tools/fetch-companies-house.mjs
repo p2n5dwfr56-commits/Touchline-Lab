@@ -55,6 +55,19 @@ async function get(url, accept, binary) {
 
 // The text of one filing: machine-readable pages stripped of tags, a PDF's own text, or OCR of its scans
 function htmlText(x) {
+  // Accounts software often places each label and number in its own positioned box: put the boxes back into lines
+  const boxes = [...x.replace(/<div[^>]*\/>/g, '').matchAll(/<div[^>]*style="[^"]*top:\s*([\d.]+)pt;\s*left:\s*([\d.]+)pt[^"]*"[^>]*>([\s\S]*?)<\/div>/g)];
+  if (boxes.length > 200) {
+    const plain = (h) => h.replace(/<[^>]+>/g, '').replace(/&nbsp;|&#160;/g, ' ').replace(/&amp;/g, '&').replace(/&pound;|&#163;/g, '£').replace(/&#8217;|&rsquo;/g, '’').replace(/&#\d+;|&[a-z]+;/g, ' ').replace(/\s+/g, ' ').trim();
+    const pages = [[]];
+    let lastTop = -1;
+    boxes.forEach((m) => { const top = +m[1], left = +m[2], t = plain(m[3]); if (lastTop >= 0 && top < lastTop - 300) pages.push([]); lastTop = top; if (t) pages[pages.length - 1].push({ top, left, t }); });
+    return pages.map((pg) => {
+      const rows = [];
+      pg.sort((a, b) => a.top - b.top || a.left - b.left).forEach((b) => { const r = rows.find((q) => Math.abs(q.top - b.top) < 2.5); if (r) r.items.push(b); else rows.push({ top: b.top, items: [b] }); });
+      return rows.sort((a, b) => a.top - b.top).map((r) => r.items.sort((a, b) => a.left - b.left).map((b) => b.t).join('  ')).join('\n');
+    }).join('\n\f\n');
+  }
   return x.replace(/<head[\s\S]*?<\/head>/i, '').replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
     .replace(/<\/(p|div|tr|li|h\d)>|<br\s*\/?>/gi, '\n').replace(/<\/t[dh]>/gi, '  ').replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;|&#160;/g, ' ').replace(/&amp;/g, '&').replace(/&pound;|&#163;/g, '£').replace(/&#8217;|&rsquo;/g, '’').replace(/&#\d+;|&[a-z]+;/g, ' ')
@@ -89,11 +102,22 @@ async function download(club, number) {
   const got = [];
   for (const i of want) {
     const ye = i.description_values.made_up_date, base = join(CACHE, `${number}-${ye}`);
+    // --refresh-ixbrl: read machine-readable filings again (e.g. after a change in how they are read)
+    if (args.includes('--refresh-ixbrl') && existsSync(base + '.json') && JSON.parse(readFileSync(base + '.json', 'utf8')).format === 'ixbrl' && existsSync(base + '.txt') && !existsSync(base + '.pdf')) execFileSync('rm', ['-f', base + '.txt']);
     if (!existsSync(base + '.txt')) {
       const meta = await get(i.links.document_metadata);
       const types = Object.keys(meta.resources || {});
       let text;
-      if (types.includes('application/xhtml+xml')) {
+      // Machine-readable filings come as PDFs too: their text layer keeps each statement line together
+      // (the iXBRL page often places every label and number in its own box), so the PDF text comes first
+      let viaPdf = '';
+      if (types.includes('application/pdf') && types.includes('application/xhtml+xml')) {
+        const pbuf = await get(meta.links.document, 'application/pdf', true);
+        writeFileSync(base + '.pdf', pbuf);
+        try { viaPdf = execFileSync('pdftotext', ['-layout', base + '.pdf', '-'], { maxBuffer: 64 << 20 }).toString(); } catch (e) { viaPdf = ''; }
+      }
+      if (viaPdf.replace(/\s/g, '').length > 2000) text = viaPdf;
+      else if (types.includes('application/xhtml+xml')) {
         const buf = await get(meta.links.document, 'application/xhtml+xml', true);
         writeFileSync(base + '.xhtml', buf);
         text = htmlText(buf.toString('utf8'));
@@ -119,14 +143,16 @@ const NUM = /\(?(?:-(?=£?\d))?£?\s?\d{1,3}(?:[,.]\d{3})+\)?|\(?(?:-(?=£?\d))?
 function lineNums(line) {
   const tail = line.replace(/^[^\d(–—-]*?(?=[\s(]*[\d(]|\s[-–—]\s)/, '');
   const toks = (tail.match(NUM) || []).map((t) => t.trim());
+  if (toks.length >= 4 && /^[-–—]$/.test(toks[toks.length - 1])) toks.pop(); // a stray dash after the last column
   const vals = toks.map((t) => (/^[-–—]$/.test(t) ? 0 : (t.includes('(') || /^-/.test(t) ? -1 : 1) * Number(t.replace(/[^\d]/g, ''))));
   return vals;
 }
 // The statement values for a label: the last two numbers on the line are this year and last year
 // (a note number may come first; a short number before large ones is taken as the note)
-function pick(vals) {
+function pick(vals, lastTwo) {
   if (!vals.length) return null;
   let v = vals.slice();
+  if (lastTwo && v.length >= 3) return { cur: v[v.length - 2], prev: v[v.length - 1] }; // columns before the totals
   while (v.length > 2 && Math.abs(v[0]) < 100) v = v.slice(1); // note references ("5", "45" for notes 4 and 5)
   if (v.length > 2) v = v.slice(0, 2);
   return { cur: v[0], prev: v.length > 1 ? v[1] : null };
@@ -148,21 +174,35 @@ const SPLIT = { gate: /^(gate receipts|match ?day|ticketing|season tickets and g
 function parseFiling(text, meta) {
   const pages = text.split('\f').length > 2 ? text.split('\f') : text.split(/\n(?=.*(?:Consolidated|Group|Company)?\s*(?:Profit and Loss Account|Statement of Comprehensive Income|Income Statement|Balance Sheet))/i);
   // OCR noise: stray marks between label and figures, braces for brackets, leading dots
-  const lines = text.split('\n').map((l) => l.replace(/[|_>*'"“”‘]/g, ' ').replace(/\{/g, '(').replace(/\}/g, ')').replace(/\s[.:;,]+(?=\s)/g, ' ').replace(/^[\s.:;,'-]+/, '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const raw = text.split('\n').map((l) => l.replace(/[|_>*'"“”‘]/g, ' ').replace(/\{/g, '(').replace(/\}/g, ')').replace(/\s[.:;,]+(?=\s)/g, ' ').replace(/^[\s.:;,'-]+/, '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+  // Labels that wrap onto the next line ("Profit on ordinary activities before" / "taxation 2,015 429")
+  const lines = [];
+  raw.forEach((l) => { const prevL = lines[lines.length - 1]; if (prevL != null && !/\d/.test(prevL) && /^[a-z]/.test(l) && prevL.length < 90) lines[lines.length - 1] = prevL + ' ' + l; else lines.push(l); });
   // The profit and loss statement: from its heading to the balance sheet
   // The statement itself, not the contents page or the highlights: a heading followed by a turnover line with
   // whole figures (not £m with decimals) and a pre-tax line
   const fullTurnover = (x) => LABELS.turnover.test(x) && !/\d\.\d/.test(x) && (() => { const v = pick(lineNums(x)); return v && Math.abs(v.cur) >= 100; })();
-  const plStart = lines.findIndex((l, i) => /(profit and loss account|statement of (comprehensive )?income|income statement)/i.test(l) && !/(notes? (on|to)|section 408|no separate|is presented|included in|dealt with)/i.test(l)
+  const plStart = lines.findIndex((l, i) => /(profit and loss account|statement of (comprehensive )?income|income statement)/i.test(l + ' ' + (lines[i + 1] || '')) && !/(notes? (on|to)|section 408|no separate|is presented|included in|dealt with)/i.test(l)
     && lines.slice(i, i + 30).some(fullTurnover) && lines.slice(i, i + 30).some((x) => LABELS.preTax.test(x)));
-  const bsStart = lines.findIndex((l, i) => i > plStart && /balance sheets?/i.test(l) && !/notes?/i.test(l) && lines.slice(i, i + 40).some((x) => /fixed assets|current assets/i.test(x)));
+  const bsStart = lines.findIndex((l, i) => i > plStart && /balance sheets?|statement of financial position/i.test(l) && !/notes?/i.test(l) && lines.slice(i, i + 40).some((x) => /fixed assets|current assets/i.test(x)));
   const pl = plStart >= 0 ? lines.slice(plStart, plStart + 40) : [];
   // Figures in thousands when the statement's column heads say £000 (or £'000)
   const UNIT = /£\s?['’`]?\s?0{3}\b|£\s?k\b|['’]000/i;
   const unitThousands = UNIT.test((pl.length ? pl : lines.slice(bsStart >= 0 ? bsStart : 0, (bsStart >= 0 ? bsStart : 0) + 15)).join(' ')) || (!pl.length && (text.match(new RegExp(UNIT.source, 'gi')) || []).length >= 3);
   const minK = unitThousands ? 50 : 50000; // staff costs below £50k are a misread
   const bs = bsStart >= 0 ? lines.slice(bsStart, bsStart + 60) : []; // no balance sheet found: no guessing from the notes
-  const find = (set, re, numsMin = 1) => { for (const l of set) if (re.test(l)) { const v = pick(lineNums(l)); if (v && v.cur != null && Math.abs(v.cur) >= (numsMin)) return v; } return null; };
+  // A statement split into columns (before player trading, player trading, then this year's and last year's totals)
+  const multi = pl.slice(0, 12).some((l) => /total.*total/i.test(l) || /player\s+trading/i.test(l));
+  const find = (set, re, numsMin = 1) => {
+    const isPl = set === pl;
+    for (const l0 of set) {
+      const l = l0.replace(/^\d{1,2}\s+(?=[A-Za-z(])/, ''); // a stray note number before the label
+      if (!re.test(l)) continue;
+      const v = pick(lineNums(l), isPl && multi);
+      if (v && v.cur != null && Math.abs(v.cur) >= numsMin) return v;
+    }
+    return null;
+  };
   const f = {};
   if (pl.length) {
     f.turnover = find(pl, LABELS.turnover, unitThousands ? 100 : 100000);
@@ -173,7 +213,7 @@ function parseFiling(text, meta) {
     f.result = find(pl, LABELS.result, 0);
   }
   // Staff costs from the notes: the total line, else wages and salaries
-  f.staff = find(lines, LABELS.staff, minK);
+  f.staff = (pl.length && find(pl, LABELS.staff, minK)) || find(lines, LABELS.staff, minK); // the statement's own line first
   f.wages = find(lines, LABELS.wages, minK);
   f.cash = find(bs, LABELS.cash, 0);
   f.netAssets = find(bs, LABELS.netAssets, 0);
@@ -214,6 +254,8 @@ function parseFiling(text, meta) {
 }
 
 async function main() {
+  // --retext: read the cached machine-readable pages again (after a change in how they are read)
+  if (args.includes('--retext')) readdirSync(CACHE).filter((f) => f.endsWith('.xhtml')).forEach((f) => writeFileSync(join(CACHE, f.replace(/\.xhtml$/, '.txt')), htmlText(readFileSync(join(CACHE, f), 'utf8'))));
   const clubs = CLUBS.filter(([c]) => !only || c.toLowerCase() === only.toLowerCase());
   const out = [];
   for (const [club, number] of clubs) {
@@ -239,13 +281,29 @@ async function main() {
         // (OCR drops digits more often than it adds them); the disagreement is kept for checking
         if (typeof v === 'number' && own[k] !== v) {
           (own.disagree = own.disagree || {})[k] = [own[k], v];
-          if (String(Math.abs(v)).replace(/0+$/, '').length > String(Math.abs(own[k])).replace(/0+$/, '').length) own[k] = v;
+          // About ten times apart is a digit gained or lost in the scan: settled after all years are read
         }
       });
       if (!years[py]) years[py] = { yearEnd: py, ...r.prev, unit: r.unit, plFound: r.plFound, fromLater: ye, source: { filed: meta.filed, format: meta.format } };
       const y = years[ye];
       if (y.disagree) console.log('     readings differ: ' + Object.entries(y.disagree).map(([k, [a, b]]) => `${k} ${a} / ${b}`).join(', '));
       console.log(`  ${ye}: turnover ${y.turnover ?? '–'} · staff ${y.staff ?? '–'} · op ${y.opResult ?? '–'} · pre-tax ${y.preTax ?? '–'} · cash ${y.cash ?? '–'} · net assets ${y.netAssets ?? '–'}${r.plFound ? '' : ' (no P&L)'}`);
+    });
+    // Two readings about ten times apart: keep the one in line with the club's other years
+    Object.values(years).forEach((y) => Object.entries(y.disagree || {}).forEach(([k, [a, b]]) => {
+      const r = Math.abs(a) / (Math.abs(b) || 1);
+      if (!((r > 6 && r < 15) || (r > 1 / 15 && r < 1 / 6))) return;
+      const others = Object.values(years).filter((z) => z !== y && z[k] != null).map((z) => Math.abs(z[k])).sort((p, q) => p - q);
+      if (!others.length) return;
+      const m = others[Math.floor(others.length / 2)], dist = (v) => Math.abs(Math.log((Math.abs(v) || 1) / m));
+      y[k] = dist(a) <= dist(b) ? a : b;
+    }));
+    // Rounded figures from the report text must sit in line with the club's other years
+    const tv = Object.values(years).filter((y) => y.turnover != null && !(y.approx || []).includes('turnover')).map((y) => y.turnover).sort((a, b) => a - b);
+    const med = tv.length ? tv[Math.floor(tv.length / 2)] : null;
+    Object.values(years).forEach((y) => {
+      if ((y.approx || []).includes('turnover') && (y.turnover < 1e6 || (med && (y.turnover < med * 0.4 || y.turnover > med * 2.5)))) { y.turnover = null; y.approx = y.approx.filter((k) => k !== 'turnover'); }
+      if ((y.approx || []).includes('preTax') && med && Math.abs(y.preTax) > med * 1.5) { y.preTax = null; y.approx = y.approx.filter((k) => k !== 'preTax'); }
     });
     out.push({ club, company: number, url: `https://find-and-update.company-information.service.gov.uk/company/${number}/filing-history`, years: Object.values(years).sort((a, b) => b.yearEnd.localeCompare(a.yearEnd)) });
   }
