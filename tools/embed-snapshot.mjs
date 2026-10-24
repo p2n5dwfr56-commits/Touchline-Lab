@@ -11,7 +11,7 @@ const FD_COLS = /^(Div|Date|HomeTeam|AwayTeam|FTHG|FTAG|Attendance|Referee|HS|AS
 const SM_TYPES = /^(Corners|Redcards|Minutes Played|Touches|Passes|Accurate Passes|Key Passes|Goals|Assists|Shots Total|Shots On Target|Tackles|Interceptions|Ball Recovery|Clearances|Total Duels|Duels Won|Dribble Attempts|Successful Dribbles|Fouls|Total Crosses|Yellowcards|Saves|Goalkeeper Goals Conceded|Rating|Aerials Won|Aerials Lost|Tackles Won|Big Chances Created|Passes In Final Third|Long Balls|Long Balls Won|Possession Lost|Dispossessed|Dribbled Past|Blocked Shots|Fouls Drawn|Error Lead To Shot|Error Lead To Goal|Man of Match|Accurate Crosses|Ball Possession %)$/;
 function compact(name, text) {
   if (/\.csv$/i.test(name)) {
-    const lines = text.replace(/^﻿/, '').split(/\r?\n/);
+    const lines = text.replace(/^﻿/, '').replace(/\uFFFD/g, '').split(/\r?\n/); // stray bytes in some older files
     // Split on commas outside quotes (referee names like "Smith, J" are quoted)
     const cells = (l) => { const out = []; let cur = '', q = false; for (const ch of l) { if (ch === '"') q = !q; else if (ch === ',' && !q) { out.push(cur); cur = ''; } else cur += ch; } out.push(cur); return out; };
     const head = cells(lines[0]), keep = head.map((c, i) => (FD_COLS.test(c.trim()) ? i : -1)).filter((i) => i >= 0);
