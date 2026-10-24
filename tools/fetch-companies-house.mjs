@@ -127,7 +127,7 @@ function lineNums(line) {
 function pick(vals) {
   if (!vals.length) return null;
   let v = vals.slice();
-  while (v.length >= 3 && Math.abs(v[0]) < 40 && v.slice(1).some((x) => Math.abs(x) >= 40)) v = v.slice(1); // note references ("5", "4,5")
+  while (v.length > 2 && Math.abs(v[0]) < 100) v = v.slice(1); // note references ("5", "45" for notes 4 and 5)
   if (v.length > 2) v = v.slice(0, 2);
   return { cur: v[0], prev: v.length > 1 ? v[1] : null };
 }
@@ -140,7 +140,7 @@ const LABELS = {
   opResult: /^(group\s+)?operating\s+(\(?loss\)?|\(?profit\)?)(\s*\/\s*\(?(loss|profit)\)?)?(\s+for the (year|period))?\s*(?=[\d(–—-]|\s\d)/i,
   preTax: /^(\(?(loss|profit)\)?(\s*\/\s*\(?(loss|profit)\)?)?)\s+(on ordinary activities\s+)?before\s+tax(ation)?/i,
   result: /^\(?(loss|profit)\)?(?!.*(before tax|per (ordinary )?share|parent|company was))[^\d]{0,70}?\bfor\s+the\s+(financial\s+)?(year|period)\b/i,
-  cash: /^cash(\s+at\s+bank\s+and\s+in\s+hand|\s+and\s+cash\s+equivalents|\s+at\s+bank)\b/i,
+  cash: /^cash(\s+at\s+bank(\s+and\s+(in|on)\s+hand)?|\s+and\s+cash\s+equivalents|\s+and\s+bank\s+balances|\s+in\s+hand|\s+at\s+bank\s+and\s+on\s+hand)?\b(?!.*\b(flows?|payments|generated|inflow|outflow|beginning|end of)\b)/i,
   netAssets: /^(net\s+assets|net\s+\(liabilities\)\/assets|net\s+assets\s*\/\s*\(liabilities\)|net\s+(liabilities|\(liabilities\))|total\s+equity|shareholders['’]?\s+funds|total\s+shareholders['’]?\s+funds)\b/i,
 };
 const SPLIT = { gate: /^(gate receipts|match ?day|ticketing|season tickets and gate)/i, broadcast: /^(broadcast|television|tv)/i, sponsorship: /^(sponsorship|advertising and sponsorship)/i, commercial: /^(commercial|retail|merchandising|catering)/i, europe: /^(uefa|european|prize money)/i };
@@ -150,7 +150,11 @@ function parseFiling(text, meta) {
   // OCR noise: stray marks between label and figures, braces for brackets, leading dots
   const lines = text.split('\n').map((l) => l.replace(/[|_>*'"“”‘]/g, ' ').replace(/\{/g, '(').replace(/\}/g, ')').replace(/\s[.:;,]+(?=\s)/g, ' ').replace(/^[\s.:;,'-]+/, '').replace(/\s+/g, ' ').trim()).filter(Boolean);
   // The profit and loss statement: from its heading to the balance sheet
-  const plStart = lines.findIndex((l, i) => /(profit and loss account|statement of (comprehensive )?income|income statement)/i.test(l) && !/(notes?|page|section 408|no separate|presented|included)/i.test(l) && lines.slice(i, i + 25).some((x) => LABELS.turnover.test(x) && lineNums(x).length));
+  // The statement itself, not the contents page or the highlights: a heading followed by a turnover line with
+  // whole figures (not £m with decimals) and a pre-tax line
+  const fullTurnover = (x) => LABELS.turnover.test(x) && !/\d\.\d/.test(x) && (() => { const v = pick(lineNums(x)); return v && Math.abs(v.cur) >= 100; })();
+  const plStart = lines.findIndex((l, i) => /(profit and loss account|statement of (comprehensive )?income|income statement)/i.test(l) && !/(notes? (on|to)|section 408|no separate|is presented|included in|dealt with)/i.test(l)
+    && lines.slice(i, i + 30).some(fullTurnover) && lines.slice(i, i + 30).some((x) => LABELS.preTax.test(x)));
   const bsStart = lines.findIndex((l, i) => i > plStart && /balance sheets?/i.test(l) && !/notes?/i.test(l) && lines.slice(i, i + 40).some((x) => /fixed assets|current assets/i.test(x)));
   const pl = plStart >= 0 ? lines.slice(plStart, plStart + 40) : [];
   // Figures in thousands when the statement's column heads say £000 (or £'000)
@@ -190,6 +194,18 @@ function parseFiling(text, meta) {
     return y;
   };
   const cur = make(year, 'cur'), pre = make(prev, 'prev');
+  // The statement could not be read: the directors' report usually states the headline figures in words
+  // ("Revenue for the year … totalled £94.1 million", "a loss before taxation of £2.1m"); rounded, so marked
+  const flat = text.replace(/\s+/g, ' ');
+  const words = (re) => { const m = flat.match(re); return m ? Math.round(parseFloat(m[m.length - 2]) * 1e6) : null; };
+  if (cur.turnover == null) {
+    const v = words(/\b(?:revenue|turnover)\b(?:(?!increased|decreased|rose|fell|grew|by £)[^.£]){0,70}?\b(?:of|totalled|totaled|was|amounted to|reached)\s+£\s?(\d{1,3}(?:\.\d{1,3})?)\s?(m\b|million)/i);
+    if (v) { cur.turnover = v; (cur.approx = cur.approx || []).push('turnover'); }
+  }
+  if (cur.preTax == null) {
+    const m = flat.match(/\b(loss|profit) (?:on ordinary activities )?before tax(?:ation)?\s+(?:of|was|amounted to)\s+£\s?(\d{1,3}(?:\.\d{1,3})?)\s?(m\b|million)/i);
+    if (m) { cur.preTax = Math.round(parseFloat(m[2]) * 1e6) * (/loss/i.test(m[1]) ? -1 : 1); (cur.approx = cur.approx || []).push('preTax'); }
+  }
   // Check: preTax and result should be close; turnover should exceed staff costs' plausibility floor
   const checks = [];
   if (cur.turnover != null && cur.staff != null) checks.push(cur.staff > 0 && cur.staff < cur.turnover * 3 ? 'staff-ok' : 'staff-odd');
@@ -216,9 +232,19 @@ async function main() {
       const own = { yearEnd: ye, ...r.cur, unit: r.unit, plFound: r.plFound, checks: r.checks, source: { filed: meta.filed, format: meta.format } };
       const later = years[ye]; // set from the following year's filing (prev column), if that was read first
       years[ye] = own;
-      if (later) Object.entries(later).forEach(([k, v]) => { if (own[k] == null && v != null && !['yearEnd', 'source', 'checks', 'fromLater', 'plFound', 'unit'].includes(k)) { own[k] = v; (own.filled = own.filled || []).push(k); } });
+      if (later) Object.entries(later).forEach(([k, v]) => {
+        if (['yearEnd', 'source', 'checks', 'fromLater', 'plFound', 'unit', 'split'].includes(k) || v == null) return;
+        if (own[k] == null) { own[k] = v; (own.filled = own.filled || []).push(k); return; }
+        // Two readings of the same figure: when they disagree, the one with more digits is usually right
+        // (OCR drops digits more often than it adds them); the disagreement is kept for checking
+        if (typeof v === 'number' && own[k] !== v) {
+          (own.disagree = own.disagree || {})[k] = [own[k], v];
+          if (String(Math.abs(v)).replace(/0+$/, '').length > String(Math.abs(own[k])).replace(/0+$/, '').length) own[k] = v;
+        }
+      });
       if (!years[py]) years[py] = { yearEnd: py, ...r.prev, unit: r.unit, plFound: r.plFound, fromLater: ye, source: { filed: meta.filed, format: meta.format } };
       const y = years[ye];
+      if (y.disagree) console.log('     readings differ: ' + Object.entries(y.disagree).map(([k, [a, b]]) => `${k} ${a} / ${b}`).join(', '));
       console.log(`  ${ye}: turnover ${y.turnover ?? '–'} · staff ${y.staff ?? '–'} · op ${y.opResult ?? '–'} · pre-tax ${y.preTax ?? '–'} · cash ${y.cash ?? '–'} · net assets ${y.netAssets ?? '–'}${r.plFound ? '' : ' (no P&L)'}`);
     });
     out.push({ club, company: number, url: `https://find-and-update.company-information.service.gov.uk/company/${number}/filing-history`, years: Object.values(years).sort((a, b) => b.yearEnd.localeCompare(a.yearEnd)) });

@@ -87,15 +87,21 @@ function viewFinance(el) {
         const s = finSeason(y.yearEnd), P = seasonPositions()[s], me = P && P[key];
         return h('tr', { style: { cursor: 'default' }, title: y.fromLater ? `From the previous-year column of the accounts to ${fmtYE(y.fromLater)}` : '' },
           h('td', { class: 'l' }, h('b', { text: fmtYE(y.yearEnd) }), y.fromLater ? h('span', { class: 'sub', text: ' *' }) : null), h('td', { class: 'l sub', text: s }),
-          [y.turnover, y.staff].map((v) => h('td', { text: money(v) })), h('td', { text: Number.isFinite(ratio(y)) ? ratio(y).toFixed(0) + '%' : '–' }),
-          [y.playerSales, y.opResult, y.preTax, y.cash, y.netAssets].map((v) => h('td', { class: v != null && v < 0 ? 'neg' : '', text: money(v) })),
+          ['turnover', 'staff'].map((k) => fcell(y, k)), h('td', { text: Number.isFinite(ratio(y)) ? ratio(y).toFixed(0) + '%' : '–' }),
+          ['playerSales', 'opResult', 'preTax', 'cash', 'netAssets'].map((k) => fcell(y, k)),
           h('td', { class: 'sub', text: me ? ordinal(me.pos) : '' }));
       })))),
-      h('p', { class: 'note' }, 'Operating result is as each set of accounts states it: some clubs and years show it before player sales, others after, so compare turnover, staff costs and pre-tax results across clubs. * from the previous-year column of the next year’s accounts. Filings: ',
+      h('p', { class: 'note' }, 'Operating result is as each set of accounts states it: some clubs and years show it before player sales, others after, so compare turnover, staff costs and pre-tax results across clubs. * from the previous-year column of the next year’s accounts. † two sets of accounts give different figures (hover for both). ≈ rounded figure from the directors’ report where the statement page could not be read. Filings: ',
         h('a', { href: C.url, target: '_blank', rel: 'noopener', text: 'Companies House' }), '.')));
   } else grid.append(card({ title: 'Finances', span: true }, null, h('p', { class: 'note', style: { marginTop: 0 }, text: `No accounts are loaded for ${teamName(S.team)}. The loaded file covers: ${clubs.map(([, c]) => c.club).join(', ')}.` })));
 
   leagueFinance(grid, key);
+}
+// A table cell for one figure; † where two sets of accounts give different numbers for that year
+function fcell(y, k) {
+  const v = y[k], d = y.disagree && y.disagree[k];
+  if (y.approx && y.approx.includes(k)) return h('td', { class: v != null && v < 0 ? 'neg' : '', title: 'Rounded figure from the directors’ report: the statement page could not be read' }, '≈' + money(v));
+  return h('td', { class: v != null && v < 0 ? 'neg' : '', title: d ? `This year's accounts read ${money(d[0])}; the next year's comparative reads ${money(d[1])} (a restatement, or a misread in the scanned page)` : null }, money(v), d ? h('sup', { class: 'sub', text: '†' }) : null);
 }
 const fmtYE = (ye, short) => { const d = new Date(ye + 'T12:00:00Z'); return short ? d.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }) : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); };
 
