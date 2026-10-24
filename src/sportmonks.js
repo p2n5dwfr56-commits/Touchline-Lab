@@ -58,6 +58,26 @@ function smCupMatch(db, b, f, typeOf) {
   return m;
 }
 
+// A league match the season file doesn't have yet (football-data.co.uk lags a day or two behind):
+// built from Sportmonks alone, so it has no odds, attendance or referee
+function smLeagueMatch(db, f, typeOf, H, A) {
+  const { hg, ag } = smScore(f);
+  const stat = (team, name) => { const x = (f.stats || []).find((y) => y.team === team && typeOf[y.type] === name); return x && typeof x.value === 'number' ? x.value : NaN; };
+  const ts = {};
+  [[H, f.home.id, f.away.id], [A, f.away.id, f.home.id]].forEach(([T, me, op]) => {
+    const s = blankTeam();
+    Object.keys(s).forEach((k) => { if (typeof s[k] === 'number') s[k] = NaN; });
+    s.n = 1; s.g = T === H ? hg : ag; s.ga = T === H ? ag : hg;
+    s.w = s.g > s.ga ? 1 : 0; s.d = s.g === s.ga ? 1 : 0; s.l = s.g < s.ga ? 1 : 0; s.pts = 3 * s.w + s.d;
+    s.sh = stat(me, 'Shots Total'); s.sha = stat(op, 'Shots Total'); s.sot = stat(me, 'Shots On Target');
+    s.cor = stat(me, 'Corners'); s.fls = stat(me, 'Fouls'); s.yc = stat(me, 'Yellowcards'); s.rc = stat(me, 'Redcards');
+    ts[T] = s;
+  });
+  const m = { id: 'sml-' + f.id, round: 0, date: String(f.date || '').slice(0, 10), home: H, away: A, hg, ag, forms: {}, lineups: {}, subs: {}, minutes: {}, events: [], poss: [], ts, ps: {}, timeline: [], odds: null, att: null, info: {} };
+  db.matches.push(m);
+  return m;
+}
+
 // Player id for a Sportmonks name: the same id another source gave that player when the names
 // differ only by a short first name ("Dan Happe" / "Daniel Happe"), else the usual key.
 function smPlayerId(db, team, name, memo) {
@@ -84,7 +104,7 @@ function attachSportmonks(db, b) {
   const seen = new Set();
   b.fixtures.forEach((f) => (f.lineups || []).forEach((l) => Object.keys(l.d || {}).forEach((k) => { const fld = SM_PLAYER[typeOf[k]]; if (fld) seen.add(fld); })));
   const roleCount = {}, memo = {};
-  let finished = 0, matched = 0, upcoming = 0;
+  let finished = 0, matched = 0, upcoming = 0, added = 0;
   const unmatched = [];
 
   const cup = smIsCup(b);
@@ -101,7 +121,8 @@ function attachSportmonks(db, b) {
     if (cup && !H && !A) return; // a tie between two clubs outside this league
     finished++;
     // Cup ties become cup matches (lower-league opponents included); league matches are matched to the season file
-    const m = cup ? smCupMatch(db, b, f, typeOf) : H && A && db.matches.find((x) => x.home === H && x.away === A && x.date && fbDays(x.date, date) <= 1);
+    let m = cup ? smCupMatch(db, b, f, typeOf) : H && A && db.matches.find((x) => x.home === H && x.away === A && x.date && fbDays(x.date, date) <= 1);
+    if (!m && !cup && H && A && f.score.home != null) { m = smLeagueMatch(db, f, typeOf, H, A); added++; } // played since the season file was last updated
     if (!m) { unmatched.push(`${date} ${f.home && f.home.name} v ${f.away && f.away.name}`); return; }
     if (cup) { H = m.home; A = m.away; }
     matched++;
@@ -192,18 +213,24 @@ function attachSportmonks(db, b) {
       const ts = m.ts[team];
       if (!ts) return;
       const mine = Object.entries(m.ps).filter(([id]) => db.players[id] && db.players[id].team === team).map(([, s]) => s);
-      [['pa', 'pa'], ['pc', 'pc'], ['tkl', 'tkl'], ['int', 'int'], ['duel', 'duel'], ['duelW', 'duelW'], ['drb', 'drb'], ['drbW', 'drbW'], ['rec', 'rec']].forEach(([tk, pk]) => {
+      [['pa', 'pa'], ['pc', 'pc'], ['tkl', 'tkl'], ['int', 'int'], ['duel', 'duel'], ['duelW', 'duelW'], ['drb', 'drb'], ['drbW', 'drbW'], ['rec', 'rec'], ['sh', 'sh'], ['sot', 'sot'], ['fls', 'fls']].forEach(([tk, pk]) => {
         if (!has(ts[tk]) && mine.length && seen.has(pk)) ts[tk] = mine.reduce((sum, s) => sum + (has(s[pk]) ? s[pk] : 0), 0);
       });
       const poss = (f.stats || []).find((x) => x.team === (team === H ? f.home.id : f.away.id) && typeOf[x.type] === 'Ball Possession %');
       if (poss && !has(ts.posT)) { ts.posT = poss.value; ts.oposT = 100 - poss.value; }
     });
+    if (m.ts[H] && m.ts[A]) { if (!has(m.ts[H].sha)) m.ts[H].sha = m.ts[A].sh; if (!has(m.ts[A].sha)) m.ts[A].sha = m.ts[H].sh; } // shots against: the other side's shots
     m.info = { ...(m.info || {}), venue: f.venue || (m.info && m.info.venue) };
   });
+  if (added) { // keep the season in date order, with round numbers for the new matches
+    db.matches.sort((a, c) => (a.date || '').localeCompare(c.date || ''));
+    const n = {};
+    db.matches.forEach((x) => { n[x.home] = (n[x.home] || 0) + 1; n[x.away] = (n[x.away] || 0) + 1; if (String(x.id).startsWith('sml-')) x.round = Math.max(n[x.home], n[x.away]); });
+  }
   Object.entries(roleCount).forEach(([pid, rc]) => { if (db.players[pid]) db.players[pid].role = Object.entries(rc).sort((a, c) => c[1] - a[1])[0][0]; });
   db.hasLineups = db.matches.concat(db.cups || []).some((m) => Object.values(m.lineups || {}).some((l) => l.length));
   db.hasPlayers = true;
-  return { finished, matched, unmatched, upcoming, cup, season: b.season && b.season.name, league: b.league && b.league.name };
+  return { finished, matched, added, unmatched, upcoming, cup, season: b.season && b.season.name, league: b.league && b.league.name };
 }
 
 if (typeof module !== 'undefined') module.exports = { attachSportmonks, smIsBundle };

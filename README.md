@@ -224,6 +224,15 @@ changes), not in the page, so they stay current across republishes: the owner an
 from the page (Edit prices), everyone else reads them. Outside claude.ai the tab says the list is kept
 there. Aberdeen's 2026 prices were entered from the club's published menu; tick "Checked against the
 club's own published menu" once confirmed on afc.co.uk.
+Other clubs have their own menus (`matchday/menu-<club>`, listed in `matchday/clubs`); pick one at the
+top of the tab, and **Across the clubs** compares the same items.
+
+## Updates after each round
+`tools/refresh.sh` (with `SPORTMONKS_TOKEN` set) fetches the latest Premiership matches from Sportmonks and
+Aberdeen's cup ties from Wikipedia, updates the snapshot date, rebuilds and smoke-tests the page
+(`--check` only asks whether anything has finished; `--no-fetch` rebuilds only). League matches the
+football-data.co.uk file doesn't have yet are built from Sportmonks alone. A scheduled cloud session runs it
+every evening and republishes: see [docs/scheduled-update.md](docs/scheduled-update.md).
 
 ## How far back
 Snapshot builds carry every Scottish top-flight season from 1994/95 (football-data.co.uk: results for all

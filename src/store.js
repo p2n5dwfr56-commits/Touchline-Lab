@@ -95,7 +95,7 @@ async function baseLog() {
   const log = await storeGet('log');
   if (log) return log;
   const real = (typeof SEASONS !== 'undefined' && SEASONS.real) || DB; // the current season, even while a past one is on screen
-  if (real.snapshot && SNAP) return { v: 1, savedAt: Date.now(), label: real.label, primary: SNAP.primary, fbref: snapshotFbref(real), layers: (SNAP.layers || []).slice(), manual: [] };
+  if (real.snapshot && SNAP) return { v: 1, base: 'snapshot', savedAt: Date.now(), label: real.label, primary: SNAP.primary, fbref: snapshotFbref(real), layers: (SNAP.layers || []).slice(), manual: [] };
   return null;
 }
 async function saveFbref(teamId, teamNameText, texts) {
@@ -162,9 +162,24 @@ async function loadRealData() {
 }
 
 /* On open: rebuild the last session from the saved log. Returns a message, or null if nothing was saved. */
+// A log saved on top of the built-in data holds a copy of it: take the built-in files instead where
+// they are newer, so each update of the page reaches viewers who saved their own additions
+const lastDate = (text) => { let best = ''; String(text || '').replace(/(\d{2})\/(\d{2})\/(\d{4})|"fetched":\s*"(\d{4}-\d{2}-\d{2})/g, (_, d, mo, y, f) => { const v = f || `${y}-${mo}-${d}`; if (v > best) best = v; }); return best; };
+function freshenFromSnapshot(log) {
+  if (!SNAP) return log;
+  const sameBase = log.base === 'snapshot' || (log.primary.length === SNAP.primary.length && log.primary.every((f, i) => f.name === SNAP.primary[i].name));
+  if (!sameBase) return log;
+  const newer = (mine, snap) => (lastDate(snap.text) >= lastDate(mine.text) ? snap : mine);
+  const primary = log.primary.map((f, i) => newer(f, SNAP.primary[i]));
+  const snapLayers = SNAP.layers || [];
+  const layers = (log.layers || []).map((l) => { const s = snapLayers.find((x) => x.name === l.name); return s ? newer(l, s) : l; })
+    .concat(snapLayers.filter((s) => !(log.layers || []).some((l) => l.name === s.name)));
+  return { ...log, primary, layers, fromSnapshot: primary.some((f, i) => f === SNAP.primary[i]) };
+}
 async function restoreSaved() {
-  const log = await storeGet('log');
-  if (!log || !log.primary || !log.primary.length) return null;
+  const saved = await storeGet('log');
+  if (!saved || !saved.primary || !saved.primary.length) return null;
+  const log = freshenFromSnapshot(saved);
   try {
     const ok = importTexts(log.primary, null, { restore: true });
     if (!ok) return { error: 'Your saved data could not be loaded again, so the demo season is showing. Import your files again in the Data tab.' };
@@ -173,6 +188,7 @@ async function restoreSaved() {
     (log.manual || []).forEach((e) => applyManual(DB, e));
     cache.clear();
     DB.manual = (log.manual || []).slice();
+    if (log.fromSnapshot) DB.snapshot = SNAP.asOf;
     STORE.meta = savedSummary(log);
     return { ok: true };
   } catch (e) {
