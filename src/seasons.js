@@ -153,6 +153,8 @@ function viewSeasons(el) {
     const notes = f && f.notes ? f.notes : w && w.europe ? '' : '';
     return [x.season, { pos: x.r.pos, pts: x.r.a.pts, mp: x.r.a.n, w: x.r.a.w, d: x.r.a.d, l: x.r.a.l, scorer: scorerOf(x) === '–' ? '' : scorerOf(x), notes, title: x.r.pos === 1 }];
   });
+  // Clubs picked here are compared in League finishes, Points per game and Goals per game
+  let cmp = { picks: [], span: 'all', first: null, P: {} };
   if (fin.length >= 3) {
     // Other clubs' finishes: every season with a full league table (football-data files: 1994/95 on), and before that
     // the top-flight seasons in each club's Wikipedia list of seasons, where loaded
@@ -169,11 +171,12 @@ function viewSeasons(el) {
     const tools = first && fin[0][0] < first ? seg([['all', 'Since ' + fin[0][0].slice(0, 4)], ['recent', 'Since ' + first]], span, (v) => { S.finSpan = v; const y = window.scrollY; render(); window.scrollTo(0, y); }, 'Seasons shown') : null;
     const older = Object.values(clubs).some((c) => first && c.first < first);
     const extras = S.finPick.map((tk, i) => ({ name: clubs[tk].name, color: PAL[i % PAL.length], at: Object.fromEntries(Object.entries(P).filter(([, t]) => t[tk]).map(([season, t]) => [season, t[tk]])) }));
+    cmp = { picks: extras.map((e, i) => ({ ...e, tk: S.finPick[i] })), span, first, P };
     const chips = Object.keys(clubs).length ? h('div', { class: 'ask-chips', style: { margin: '0 0 10px' } }, Object.entries(clubs).sort((a, b) => b[1].n - a[1].n || a[1].name.localeCompare(b[1].name)).map(([tk, c]) => {
       const i = S.finPick.indexOf(tk), col = i >= 0 ? PAL[i % PAL.length] : null;
       return h('button', { type: 'button', class: 'ask-chip att-chip', 'aria-pressed': String(i >= 0), title: `${c.n} top-flight seasons since ${c.first}`, onclick: () => toggle(tk) }, h('i', { style: { background: col || 'transparent', borderColor: col || 'var(--rule-2)' } }), c.name);
     })) : null;
-    grid.append(card({ title: 'League finishes', span: true, tools }, `${teamName(S.team)}’s final league position, ${shown[0][0]} to ${shown[shown.length - 1][0]}${chips ? ` · click clubs to compare (up to ${PAL.length}; ${older ? 'top-flight seasons before ' + first + ' from each club’s Wikipedia list of seasons' : 'their positions from ' + first})` : ''}`, chips, positionChart(shown, extras)));
+    grid.append(card({ title: 'League finishes', span: true, tools }, `${teamName(S.team)}’s final league position, ${shown[0][0]} to ${shown[shown.length - 1][0]}${chips ? ` · click clubs to compare here and in the points and goals charts below (up to ${PAL.length}; ${older ? 'top-flight seasons before ' + first + ' from each club’s Wikipedia list of seasons' : 'their positions from ' + first})` : ''}`, chips, positionChart(shown, extras)));
   }
   if (H) {
     const eu = Object.keys(H.summary).concat(Object.keys(H.europe)).filter((k, i, arr) => arr.indexOf(k) === i && ((H.summary[k] && H.summary[k].europe) || H.europe[k])).sort().reverse();
@@ -183,34 +186,46 @@ function viewSeasons(el) {
         ['mp', 'w', 'd', 'l', 'gf', 'ga'].map((f) => h('td', { text: e && e[f] != null ? e[f] : '' })), h('td', { class: 'l sub', text: e && e.scorer ? e.scorer : '' })); }))))));
   }
 
-  attendanceCard(grid, key);
-
-  // Points per game and market expectation by season
-  const c1 = card('Points per game by season', 'Actual points per game against what the betting market expected before each match');
+  // Points per game and goals by season, with any clubs picked under League finishes
+  {
+  const ser = cmp.span === 'recent' && cmp.first ? asc.filter((x) => x.season >= cmp.first) : asc;
+  const at = (c, x) => { const r = c.at[x.season]; return r && r.mp ? r : null; };
+  // Points per game counts 3 for a win in every season, so eras compare
+  const val = (r, f) => (f === 'pts' ? (r.w != null && r.d != null ? (3 * r.w + r.d) / r.mp : NaN) : r[f] != null ? r[f] / r.mp : NaN);
+  const per = (c, f) => ser.map((x) => { const r = at(c, x); return r ? val(r, f) : NaN; });
+  const cmpTip = (x, f, l) => cmp.picks.map((c) => { const r = at(c, x), v = r ? val(r, f) : NaN; return has(v) ? { color: c.color, v: fmt(v, 2), l: c.name + ' ' + l } : null; }).filter(Boolean);
+  const vs = cmp.picks.length ? ' · compared with ' + cmp.picks.map((c) => c.name).join(', ') + ' (pick clubs under League finishes)' : '';
+  const c1 = card('Points per game by season', 'League points per game, counting 3 for a win in every season so eras compare' + (showMkt ? ', against what the betting market expected before each match' : '') + vs);
   const b1 = h('div');
   c1.append(b1);
   grid.append(c1);
   const B = css('--ink-2');
   lineChart(b1, {
-    labels: asc.map((x) => seasonShort(x.season)),
-    series: [{ name: 'Points per game', color: A, values: asc.map((x) => safe(x.r.a.pts, x.r.a.n)) }].concat(showMkt ? [{ name: 'Market expected', color: B, dash: '5 4', values: asc.map((x) => (has(x.r.a.mxp) ? safe(x.r.a.mxp, x.r.a.n) : NaN)) }] : []),
+    labels: ser.map((x) => seasonShort(x.season)),
+    series: cmp.picks.map((c) => ({ name: c.name, color: c.color, width: 1.6, values: per(c, 'pts') })).concat([{ name: 'Points per game', color: A, width: cmp.picks.length ? 2.6 : 2, values: ser.map((x) => ppg3(x.r.a)) }], showMkt ? [{ name: 'Market expected', color: B, dash: '5 4', values: ser.map((x) => (has(x.r.a.mxp) ? safe(x.r.a.mxp, x.r.a.n) : NaN)) }] : []),
     yFmt: (v) => v.toFixed(1),
-    tipFor: (i) => { const x = asc[i], a = x.r.a; return [{ v: x.season + (x.r.pos ? ' · ' + ordinal(x.r.pos) : ''), strong: true }, { color: A, v: fmt(safe(a.pts, a.n), 2), l: 'points per game' }, has(a.mxp) ? { color: B, v: fmt(safe(a.mxp, a.n), 2), l: 'market expected' } : null, { v: `${a.pts} pts from ${a.n} · GD ${signed(a.g - a.ga, 0)}` }].filter(Boolean); },
+    tipFor: (i) => { const x = ser[i], a = x.r.a; return [{ v: x.season + (x.r.pos ? ' · ' + ordinal(x.r.pos) : ''), strong: true }, { color: A, v: fmt(ppg3(a), 2), l: 'points per game' }, has(a.mxp) ? { color: B, v: fmt(safe(a.mxp, a.n), 2), l: 'market expected' } : null, ...cmpTip(x, 'pts', 'points per game'), { v: `${a.pts} pts from ${a.n} · GD ${signed(a.g - a.ga, 0)}` }].filter(Boolean); },
   });
-  c1.append(legend([['Points per game', A, 'line']].concat(showMkt ? [['Market expected', B, 'line line-dash']] : [])));
+  c1.append(legend([[teamName(S.team), A, 'line']].concat(showMkt ? [['Market expected', B, 'line line-dash']] : [], cmp.picks.map((c) => [c.name, c.color, 'line']))));
 
-  // Goals by season
-  const c2 = card('Goals per game by season', 'Scored and conceded in the league');
+  // Goals by season: scored and conceded, or one of them across the picked clubs
+  const gm = cmp.picks.length ? S.goalSide || 'gf' : 'both';
+  const c2 = card({ title: 'Goals per game by season', tools: cmp.picks.length ? seg([['gf', 'Scored'], ['ga', 'Conceded']], gm, (v) => { S.goalSide = v; const y = window.scrollY; render(); window.scrollTo(0, y); }, 'Goals') : null }, (gm === 'both' ? 'Scored and conceded in the league' : (gm === 'gf' ? 'Scored' : 'Conceded') + ' per league game') + vs);
   const b2 = h('div');
   c2.append(b2);
   grid.append(c2);
+  const own = (f) => ser.map((x) => safe(f === 'gf' ? x.r.a.g : x.r.a.ga, x.r.a.n));
   lineChart(b2, {
-    labels: asc.map((x) => seasonShort(x.season)),
-    series: [{ name: 'Scored', color: A, values: asc.map((x) => safe(x.r.a.g, x.r.a.n)) }, { name: 'Conceded', color: B, dash: '5 4', values: asc.map((x) => safe(x.r.a.ga, x.r.a.n)) }],
+    labels: ser.map((x) => seasonShort(x.season)),
+    series: gm === 'both' ? [{ name: 'Scored', color: A, values: own('gf') }, { name: 'Conceded', color: B, dash: '5 4', values: own('ga') }]
+      : cmp.picks.map((c) => ({ name: c.name, color: c.color, width: 1.6, values: per(c, gm) })).concat([{ name: teamName(S.team), color: A, width: 2.6, values: own(gm) }]),
     yFmt: (v) => v.toFixed(1),
-    tipFor: (i) => { const x = asc[i], a = x.r.a; return [{ v: x.season, strong: true }, { color: A, v: fmt(safe(a.g, a.n), 2), l: 'scored per game' }, { color: B, v: fmt(safe(a.ga, a.n), 2), l: 'conceded per game' }, has(a.sh) ? { v: `${fmt(safe(a.sh, a.n), 1)} shots, ${fmt(safe(a.sha, a.n), 1)} against per game` } : null].filter(Boolean); },
+    tipFor: (i) => { const x = ser[i], a = x.r.a; return [{ v: x.season, strong: true }, gm !== 'ga' ? { color: A, v: fmt(safe(a.g, a.n), 2), l: 'scored per game' } : null, gm !== 'gf' ? { color: gm === 'both' ? B : A, v: fmt(safe(a.ga, a.n), 2), l: 'conceded per game' } : null, ...(gm === 'both' ? [] : cmpTip(x, gm, gm === 'gf' ? 'scored per game' : 'conceded per game')), has(a.sh) ? { v: `${fmt(safe(a.sh, a.n), 1)} shots, ${fmt(safe(a.sha, a.n), 1)} against per game` } : null].filter(Boolean); },
   });
-  c2.append(legend([['Scored', A, 'line'], ['Conceded', B, 'line line-dash']]));
+  c2.append(legend(gm === 'both' ? [['Scored', A, 'line'], ['Conceded', B, 'line line-dash']] : [[teamName(S.team), A, 'line']].concat(cmp.picks.map((c) => [c.name, c.color, 'line']))));
+  }
+
+  attendanceCard(grid, key);
 
   // Points race: this season against earlier ones, match by match
   const raceRows = lrows.filter((x) => x.r.race && x.r.race.length);
@@ -307,14 +322,14 @@ function seasonPositions() {
     allSeasons().forEach((x) => {
       const db = x.db || seasonDB(x.season);
       if (!db || !db.matches.length) return;
-      out[x.season] = Object.fromEntries(leagueTable(db, null).map((r) => [fbTeamKey(r.team.name), { name: r.team.name, pos: r.pos, pts: r.a.pts, mp: r.a.n, w: r.a.w, d: r.a.d, l: r.a.l }]));
+      out[x.season] = Object.fromEntries(leagueTable(db, null).map((r) => [fbTeamKey(r.team.name), { name: r.team.name, pos: r.pos, pts: r.a.pts, mp: r.a.n, w: r.a.w, d: r.a.d, l: r.a.l, gf: r.a.g, ga: r.a.ga }]));
     });
     // Before the full tables: each club's own list of seasons (top flight only)
     const full = Object.keys(out).sort()[0];
     Object.entries(CLUBHIST).forEach(([tk, H]) => Object.values(H.seasons).forEach((w) => {
       const pos = parseInt(w.pos, 10);
       if ((full && w.season >= full) || !pos || !isTopFlight(w.season, w.division, w.tier)) return;
-      (out[w.season] = out[w.season] || {})[tk] = { name: H.club, pos, pts: w.pts, mp: w.pld, w: w.w, d: w.d, l: w.l, hist: true };
+      (out[w.season] = out[w.season] || {})[tk] = { name: H.club, pos, pts: w.pts, mp: w.pld, w: w.w, d: w.d, l: w.l, gf: w.gf, ga: w.ga, hist: true };
     }));
     return out;
   });

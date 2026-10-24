@@ -103,7 +103,13 @@ function viewKey(el) {
   const opts = kpPeriodOptions();
   const nSeasons = opts.some(([v]) => v === S.kpPeriod) ? +S.kpPeriod : 1;
   let rows, peerN, all, sub, cover = null;
-  const open = (pid) => { if (!DB.players[pid]) return; S.tab = 'players'; S.player = pid; render(); window.scrollTo({ top: 0 }); };
+  // A player from earlier seasons opens in the last season they played for the club
+  const open = (pl) => {
+    const pid = typeof pl === 'string' ? pl : pl.id;
+    if (!DB.players[pid] && !(pl.season && pl.season !== DB.season && loadSeason(pl.season) && DB.players[pid])) return;
+    S.tab = 'players'; S.player = pid; render(); window.scrollTo({ top: 0 });
+  };
+  const profTitle = (pl) => 'Open ' + pl.name + (pl.season && !DB.players[pl.id] ? ' (profile from ' + pl.season + ', their last season here)' : '');
   if (nSeasons > 1) {
     const P = kpPeriod(T, nSeasons);
     rows = P.rows; peerN = P.peerN; all = P.rows; cover = P.seasons;
@@ -128,7 +134,7 @@ function viewKey(el) {
   el.append(h('div', { class: 'mvp-row' }, rows.slice(0, 5).map((r, i) => {
     const wts = KP_WEIGHTS[r.p.group] || KP_WEIGHTS.MID; // strengths from the areas that matter most for the position
     const best = r.metrics.filter((x) => x.pct >= 60 && (wts[x.mt.cat] || 0) >= 0.1).sort((x, y) => y.pct - x.pct).slice(0, 3);
-    const tile = h('button', { type: 'button', class: 'mvp', onclick: () => open(r.p.id) },
+    const tile = h('button', { type: 'button', class: 'mvp', onclick: () => open(r.p), title: profTitle(r.p) },
       h('div', { class: 'eyebrow', text: '#' + (i + 1) + ' · ' + (r.p.role || r.p.group) }),
       h('div', { class: 'mvp-name', text: r.p.name }),
       h('div', { class: 'mvp-score' }, h('b', { text: Math.round(r.imp) }), h('span', { text: 'importance' })),
@@ -152,7 +158,7 @@ function viewKey(el) {
   grid.append(card({ title: 'Squad ranking', span: true }, `Importance = performance × playing time · area scores are percentiles against league players in the same position (50 = average) · click a player for the full profile`,
     h('div', { class: 'tbl-wrap' }, h('table', { class: 'kp-table' },
       h('thead', null, h('tr', null, h('th', { text: '#' }), h('th', { class: 'l', text: 'Player' }), h('th', { text: 'Pos' }), cover ? h('th', { text: 'Seasons' }) : null, h('th', { text: 'Min %' }), h('th', { text: 'Importance' }), h('th', { text: 'Performance' }), cats.map(([, l]) => h('th', { text: l })))),
-      h('tbody', null, rows.map((r, i) => h('tr', { onclick: () => open(r.p.id), title: 'Open ' + r.p.name },
+      h('tbody', null, rows.map((r, i) => h('tr', { onclick: () => open(r.p), title: profTitle(r.p) },
         h('td', { text: i + 1 }), h('td', { class: 'l', text: r.p.name }), h('td', { class: 'sub', text: r.p.role || r.p.group }), cover ? h('td', { text: r.seasons }) : null, h('td', { text: Math.round(100 * r.share) }),
         h('td', null, h('b', { text: Math.round(r.imp) })), h('td', { title: r.areas < 4 ? 'Rated on goals and results only (seasons before detailed stats)' : null, text: Math.round(r.perf) + (r.areas < 4 ? ' *' : '') }), cats.map(([c]) => cell(r.cats[c]))))))),
     h('p', { class: 'note', text: `Compared with ${peerN ? 'up to ' + peerN : 'the'} league players per position with ${cover ? KP_MIN_PERIOD : KP_MIN}+ minutes. Players with few minutes are pulled towards average (50) so a good half-hour does not top the list. Importance multiplies performance by ${cover ? '(0.2 + 0.8 × √share of the team’s minutes over the period), so long-serving regulars count for more' : '(0.4 + 0.6 × share of the team’s minutes), so regulars count for more'}.` + (rows.some((r) => r.areas < 4) ? ' * Rated on goals, discipline and team results only: those seasons have no detailed stats.' : '') })));
@@ -166,7 +172,7 @@ function viewKey(el) {
     const top = all.filter((x) => has(x.a[mt.tot]) && x.a[mt.tot] > 0).sort((x, y) => y.a[mt.tot] - x.a[mt.tot]).slice(0, 3);
     const dp = mt.d || 0;
     return h('div', null, h('div', { class: 'eyebrow', text: mt.l }), h('ol', { class: 'kp-list' }, top.map((x) => h('li', null,
-      h('a', { href: '#players', onclick: (e) => { e.preventDefault(); open(x.p.id); }, text: x.p.name }),
+      h('a', { href: '#players', onclick: (e) => { e.preventDefault(); open(x.p); }, title: profTitle(x.p), text: x.p.name }),
       h('span', { class: 'sub', text: ` ${x.a[mt.tot].toFixed(dp)} (${safe(x.a[mt.tot] * 90, minFor(x.a, mt.tot)).toFixed(2)})` })))));
   }))));
 
@@ -225,7 +231,7 @@ function kpPeriod(T, n) {
         if (!(a.min > 0) || !db.teamById[p.team]) return;
         if (has(a.pa)) detail = true;
         const pre = 'pl-' + p.team + '-', key = tk(p.team) + '|' + (p.id.startsWith(pre) ? p.id.slice(pre.length) : playerKey('', p.name).slice(4));
-        const m = (players[key] = players[key] || { p: { id: p.id, name: p.name, group: p.group, role: p.role, team: tk(p.team) }, a: { n: 0, min: 0, st: 0, _min: {} }, seasons: 0 });
+        const m = (players[key] = players[key] || { p: { id: p.id, name: p.name, group: p.group, role: p.role, team: tk(p.team), season: x.season }, a: { n: 0, min: 0, st: 0, _min: {} }, seasons: 0 });
         m.seasons++;
         Object.entries(a).forEach(([k, v]) => {
           if (k === 'ppm' || typeof v !== 'number' || !has(v)) return; // ppm is a rate; the rest are totals
