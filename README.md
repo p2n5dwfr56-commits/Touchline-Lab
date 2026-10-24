@@ -245,3 +245,11 @@ compare positions before 1994/95, where full league tables start. Raith Rovers h
 table then runs from 1904/05: older seasons show the league record, cups and top scorer, PPG counts 3 points
 for a win in every era, and League finishes marks league titles. Attendances come from the supplied CSV
 (1976/77 on; partial-coverage averages are left out).
+
+## Cup results from Wikipedia
+`tools/fetch-wiki-club-matches.mjs --club Aberdeen --season 2026` reads the club's Wikipedia season article
+("2026–27 Aberdeen F.C. season") and writes every played cup tie: Scottish Cup, League Cup (group stage and
+knockout), Challenge Cup and Europe, with round, venue, score, penalty shootouts, scorers (goal markers only,
+not cards), stadium, attendance and referee. League games and friendlies are skipped. Drop the file in the
+Data tab (it goes with its season) or list it under `layers` in the snapshot manifest. These are results
+only: line-ups, formations and team stats for cup games need the API-Football cup download.

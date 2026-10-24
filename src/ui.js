@@ -125,7 +125,7 @@ const result = (m, T) => {
 };
 const venueOf = (m, T) => (m.neutral ? 'N' : m.home === T ? 'H' : 'A');
 // "Semi-finals" -> "SF", "League Cup" -> "LC" for compact labels
-const roundShort = (r) => { const s = String(r || ''); return /semi/i.test(s) ? 'SF' : /quarter/i.test(s) ? 'QF' : /^final/i.test(s) ? 'Final' : /(round of|last) ?16/i.test(s) ? 'R16' : /group/i.test(s) ? 'Group' : s.replace(/^round\s*/i, 'R').slice(0, 8); };
+const roundShort = (r) => { const s = String(r || ''); return /semi/i.test(s) ? 'SF' : /quarter/i.test(s) ? 'QF' : /^final/i.test(s) ? 'Final' : /(round of|last) ?16/i.test(s) ? 'R16' : /group/i.test(s) ? 'Group' : /^(first|second|third|fourth|fifth|sixth) round/i.test(s) ? 'R' + (['first', 'second', 'third', 'fourth', 'fifth', 'sixth'].indexOf(s.split(' ')[0].toLowerCase()) + 1) : s.replace(/^round\s*/i, 'R').slice(0, 8); };
 const compShort = (c) => String(c || 'Cup').split(/\s+/).map((w) => w[0]).join('').toUpperCase();
 const roundLabel = (m) => (m.cup ? `${compShort(m.comp)} ${roundShort(m.round)}`.trim() : 'R' + m.round);
 const matchLabel = (m, T) => `${roundLabel(m)} v ${teamName(oppOf(m, T))} (${venueOf(m, T)})`;
@@ -1078,20 +1078,22 @@ function viewMatches(el) {
       h('span', { class: 'xg', text: m.pens ? 'pens ' + (m.home === T ? m.pens.f + '–' + m.pens.a : m.pens.a + '–' + m.pens.f) : has(m.ts[T].xg) ? m.ts[T].xg.toFixed(1) + ' – ' + m.ts[T].xga.toFixed(1) + ' xG' : has(m.ts[T].sh) ? m.ts[T].sh + ' – ' + m.ts[T].sha + ' shots' : m.cup ? m.comp : '' }));
   }));
   const report = matchReport(ms.find((m) => m.id === S.match), T);
-  grid.append(report, card('Results', teamName(T) + ' · newest first', list));
+  // Competition switch here too (same as the filter at the top)
+  const tools = hasCups(T) ? seg([['league', 'League'], ['all', 'All'], ['cups', 'Cups']], S.comp, (v) => { S.comp = v; S.match = null; render(); }, 'Competition') : null;
+  grid.append(report, card({ title: 'Results', tools }, teamName(T) + ' · newest first' + (hasCups(T) && S.comp === 'league' ? ' · league only: pick All to add cup ties' : ''), list));
 }
 function matchReport(m, T) {
   const O = oppOf(m, T), colA = css('--team-a'), colB = css('--team-b');
   const home = m.home, away = m.away;
   const wrap = h('section', { class: 'card span' });
   const info = m.info || {};
-  wrap.append(h('div', { class: 'eyebrow', text: [m.cup ? [m.comp, m.round].filter(Boolean).join(' · ') : `Round ${m.round}`, m.date ? fmtDate(m.date) : null, m.neutral ? 'Neutral venue' : null, info.att ? 'Attendance ' + info.att.toLocaleString('en-GB') : null, info.ref ? 'Referee ' + info.ref : null].filter(Boolean).join(' · ') }));
+  wrap.append(h('div', { class: 'eyebrow', text: [m.cup ? [m.comp, m.round].filter(Boolean).join(' · ') : `Round ${m.round}`, m.date ? fmtDate(m.date) : null, m.neutral ? 'Neutral venue' : null, info.stadium || null, info.att ? 'Attendance ' + info.att.toLocaleString('en-GB') : null, info.ref ? 'Referee ' + info.ref : null, m.src ? 'Result from ' + m.src : null].filter(Boolean).join(' · ') }));
   const colOf = (id) => (id === T ? colA : colB);
   wrap.append(h('div', { class: 'scoreboard' },
     h('div', null, h('div', { class: 'tn', style: { color: colOf(home) }, text: teamName(home) }), h('div', { class: 'xgs', text: [m.forms[home], has(m.ts[home].xg) ? m.ts[home].xg.toFixed(2) + ' xG' : null].filter(Boolean).join(' · ') })),
     h('div', { class: 'sc', text: m.hg + '–' + m.ag }, m.pens ? h('div', { class: 'xgs', style: { textAlign: 'center' }, text: `${m.pens.f}–${m.pens.a} on penalties` }) : null),
     h('div', null, h('div', { class: 'tn r', style: { color: colOf(away) }, text: teamName(away) }), h('div', { class: 'xgs', style: { textAlign: 'right' }, text: [has(m.ts[away].xg) ? m.ts[away].xg.toFixed(2) + ' xG' : null, m.forms[away]].filter(Boolean).join(' · ') }))));
-  const scorers = (id) => m.timeline ? m.timeline.filter((t) => t.kind === 'goal' && t.team === id).map((t) => (DB.players[t.pl] ? DB.players[t.pl].name.split(' ').pop() : t.ogName ? t.ogName.split(' ').pop() : '?') + ' ' + t.min + "'" + (/penalty/i.test(t.detail) ? ' (p)' : /own/i.test(t.detail) ? ' (og)' : '')).join(', ') : m.events.filter((e) => e.type === 'shot' && e.out === 'goal' && e.team === id).map((e) => DB.players[e.pl].name.split(' ').pop() + ' ' + Math.floor(e.t / 60 + 1) + "'" + (e.sp === 'pen' ? ' (p)' : '')).join(', ');
+  const scorers = (id) => m.wikiScorers ? (m.wikiScorers[id] || []).join(', ') : m.timeline ? m.timeline.filter((t) => t.kind === 'goal' && t.team === id).map((t) => (DB.players[t.pl] ? DB.players[t.pl].name.split(' ').pop() : t.ogName ? t.ogName.split(' ').pop() : '?') + ' ' + t.min + "'" + (/penalty/i.test(t.detail) ? ' (p)' : /own/i.test(t.detail) ? ' (og)' : '')).join(', ') : m.events.filter((e) => e.type === 'shot' && e.out === 'goal' && e.team === id).map((e) => DB.players[e.pl].name.split(' ').pop() + ' ' + Math.floor(e.t / 60 + 1) + "'" + (e.sp === 'pen' ? ' (p)' : '')).join(', ');
   wrap.append(h('div', { class: 'scoreboard', style: { marginBottom: '16px' } }, h('div', { class: 'sub', text: scorers(home) }), h('div'), h('div', { class: 'sub', style: { textAlign: 'right' }, text: scorers(away) })));
   const grid = h('div', { class: 'grid' });
   wrap.append(grid);
@@ -1307,14 +1309,29 @@ function importTexts(texts, statusEl, opts = {}) {
   const fail = (msg) => { if (statusEl) { statusEl.className = 'status err'; statusEl.textContent = msg; } return false; };
   const prevSnap = DB && DB.snapshot ? DB.label : null; // replacing the built-in snapshot with a newer file for the same season
   // CSV files (football-data.co.uk) and JSON files (API-Football, StatsBomb) are told apart by content.
-  const csv = [], parsed = [], fb = [], sm = [], evb = [], att = [], hist = [];
+  const csv = [], parsed = [], fb = [], sm = [], evb = [], att = [], hist = [], cupf = [];
   texts.forEach((f) => {
     const t = f.text.replace(/^﻿/, '').trimStart();
-    if (t[0] === '[' || t[0] === '{') { const data = JSON.parse(t); if (smIsBundle(data)) sm.push({ name: f.name, text: f.text, data }); else if (data && data.source === 'touchline-events') evb.push(data); else if (isAttendanceFile(data)) att.push({ name: f.name, text: f.text, data }); else if (isClubHistory(data)) hist.push({ name: f.name, text: f.text, data }); else parsed.push({ name: f.name, data }); }
+    if (t[0] === '[' || t[0] === '{') { const data = JSON.parse(t); if (smIsBundle(data)) sm.push({ name: f.name, text: f.text, data }); else if (data && data.source === 'touchline-events') evb.push(data); else if (isAttendanceFile(data)) att.push({ name: f.name, text: f.text, data }); else if (isClubHistory(data)) hist.push({ name: f.name, text: f.text, data }); else if (isCupsFile(data)) cupf.push({ name: f.name, text: f.text, data }); else parsed.push({ name: f.name, data }); }
     else if (isAttendanceCSV(t)) { const data = attendanceCSV(t); att.push({ name: f.name, text: JSON.stringify(data), data }); }
     else if (fdIsCSV(fdParseCSV(t))) csv.push({ name: f.name, rows: fdParseCSV(t) });
     else if (fbIsHistory(t) || fbIsLeagueTable(t) || fbIsWikiAttendance(t) || fbIsTable(fbParse(t)) || fbIsFixtures(fbParse(t)) || fbIsRecords(fbParse(t))) fb.push({ name: f.name, text: t });
   });
+  // Cup results (Wikipedia season article) go with their season, whichever is open
+  if (cupf.length && !csv.length && !parsed.length && !fb.length && !sm.length && !evb.length) {
+    const done = [], missing = [];
+    cupf.forEach((f) => {
+      const k = f.data.season;
+      if (SEASONS.real && SEASONS.real.season === k) { const n = attachCupsFile(SEASONS.real, f.data); if (!opts.restore) saveLayers([{ name: f.name, text: f.text }]); done.push(`${n} ${f.data.club} cup matches in ${k}`); }
+      else if (SEASONS.list.some((x) => x.season === k)) { pastAddLayer(k, { name: f.name, text: f.text }).then(refreshSeasons).then(() => { delete SEASON_DB[k]; if (DB.season === k && loadSeason(k)) { S.comp = 'all'; S.tab = 'matches'; render(); } }); done.push(`${f.data.matches.length} ${f.data.club} cup matches in ${k}`); }
+      else missing.push(k);
+    });
+    if (!done.length) return fail(`Load the ${missing.join(', ')} season first (its football-data.co.uk file), then add the cup file.`);
+    cache.clear();
+    S.comp = 'all'; S.tab = 'matches'; S.match = null; render();
+    flash('Added ' + done.join('; ') + '. Matches now shows all competitions; switch Competition at the top to League only or Cups only.' + (missing.length ? ` Skipped ${missing.join(', ')}: load that season first.` : ''));
+    return true;
+  }
   // Club histories (Wikipedia season lists) add the club's whole league record to the Seasons tab
   if (hist.length && !csv.length && !parsed.length && !fb.length && !sm.length && !evb.length) {
     const r = hist.map((f) => addClubHistory(f.data));

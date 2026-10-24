@@ -33,7 +33,7 @@ function seasonDB(season) {
   const { db } = importFootballData(e.primary.map((f) => ({ name: f.name, rows: fdParseCSV(f.text) })));
   if (!db.matches.length) return null;
   prepareDB(db);
-  e.layers.forEach((l) => { try { const b = JSON.parse(l.text); if (smIsBundle(b)) attachSportmonks(db, b); else if (afCupLeague([{ data: b }])) attachApiFootballCups(db, [{ name: l.name, data: b }]); } catch (err) { /* skip a damaged file */ } });
+  e.layers.forEach((l) => { try { applyLayerJSON(db, l.name, JSON.parse(l.text)); } catch (err) { /* skip a damaged file */ } });
   // Built-in older seasons carry player season totals instead of every match
   if (e.summary && !e.layers.length) {
     db.seasonPS = {};

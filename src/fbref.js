@@ -73,6 +73,25 @@ function addCupMatch(db, teamId, o) {
   if (db.fixtures && db.fixtures[teamId]) db.fixtures[teamId] = db.fixtures[teamId].filter((f) => !(f.date === o.date && fbTeamKey(f.opp) === fbTeamKey(o.opp)));
   return m;
 }
+// Cup results from a club's Wikipedia season article (tools/fetch-wiki-club-matches.mjs): every Scottish Cup,
+// League Cup (group stage and knockout) and European tie, with scorers, crowd and referee
+const isCupsFile = (d) => d && d.source === 'touchline-cups' && Array.isArray(d.matches);
+function attachCupsFile(db, d) {
+  const t = db.teams.find((x) => fbTeamKey(x.name) === fbTeamKey(d.club));
+  if (!t) return 0;
+  let n = 0;
+  d.matches.forEach((o) => {
+    if (!o.date || o.gf == null || o.ga == null) return;
+    const m = addCupMatch(db, t.id, o);
+    if (!m || m.detail) return;
+    const opp = m.home === t.id ? m.away : m.home;
+    if (o.scorers) m.wikiScorers = { [t.id]: o.scorers.for || [], [opp]: o.scorers.against || [] };
+    if (o.stadium) m.info.stadium = o.stadium;
+    m.src = 'Wikipedia';
+    n++;
+  });
+  return n;
+}
 function addFixture(db, teamId, f) {
   db.fixtures = db.fixtures || {};
   const list = (db.fixtures[teamId] || []).filter((x) => !(x.date === f.date && fbTeamKey(x.opp) === fbTeamKey(f.opp)));

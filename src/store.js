@@ -66,8 +66,14 @@ async function saveLayers(files) {
   STORE.meta = ok ? savedSummary(log) : STORE.meta;
   return ok;
 }
+// A saved or built-in file on top of a season: Sportmonks line-ups, API-Football cups, or Wikipedia cup results
+function applyLayerJSON(db, name, d) {
+  if (smIsBundle(d)) attachSportmonks(db, d);
+  else if (isCupsFile(d)) attachCupsFile(db, d);
+  else if (afCupLeague([{ data: d }])) attachApiFootballCups(db, [{ name, data: d }]);
+}
 function applyLayers(layers) {
-  (layers || []).forEach((l) => { try { const d = JSON.parse(l.text); if (smIsBundle(d)) attachSportmonks(DB, d); else if (afCupLeague([{ data: d }])) attachApiFootballCups(DB, [{ name: l.name, data: d }]); } catch (e) { /* skip a damaged layer */ } });
+  (layers || []).forEach((l) => { try { applyLayerJSON(DB, l.name, JSON.parse(l.text)); } catch (e) { /* skip a damaged layer */ } });
 }
 // FBref tables and hand-entered matches saved on top of the same season (same label), so an updated season file keeps them
 async function carriedFbref(label) {
