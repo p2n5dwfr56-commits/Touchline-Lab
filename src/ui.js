@@ -10,7 +10,7 @@ const S = {
   cmpMode: 'teams', pA: null, pB: null, match: null, act: 'pass', form: null, shape: 'plan',
   opp: null, oppSort: 'next', oppScope: 'league', comp: 'league', loss: null, lossShow: 'shot', bwSort: 'wins', impMetric: 'rating', impPlayer: null, raceN: '5', kpPeriod: '1', gWin: '76', gSide: 'a',
 };
-const TABS = [['overview', 'Overview'], ['team', 'Team analysis'], ['press', 'Without the ball'], ['tactics', 'Tactics'], ['players', 'Players'], ['key', 'Key players'], ['compare', 'Compare'], ['opponents', 'Opponents'], ['seasons', 'Seasons'], ['finance', 'Finances'], ['matchday', 'Matchday'], ['matches', 'Matches'], ['ask', 'Ask AI'], ['data', 'Data']];
+const TABS = [['overview', 'Overview'], ['team', 'Team analysis'], ['press', 'Without the ball'], ['tactics', 'Tactics'], ['players', 'Players'], ['key', 'Key players'], ['compare', 'Compare'], ['opponents', 'Opponents'], ['seasons', 'Seasons'], ['managers', 'Managers'], ['finance', 'Finances'], ['matchday', 'Matchday'], ['matches', 'Matches'], ['ask', 'Ask AI'], ['data', 'Data']];
 
 /* ---------- DOM helpers ---------- */
 function h(tag, a, ...kids) {
@@ -461,7 +461,7 @@ function render() {
   hideTip();
   renderChrome();
   mainEl.replaceChildren();
-  const views = { overview: viewOverview, team: viewTeam, press: viewPress, tactics: viewTactics, players: viewPlayers, key: viewKey, compare: viewCompare, opponents: viewOpponents, seasons: viewSeasons, finance: viewFinance, matchday: viewMatchday, matches: viewMatches, ask: viewAsk, data: viewData };
+  const views = { overview: viewOverview, team: viewTeam, press: viewPress, tactics: viewTactics, players: viewPlayers, key: viewKey, compare: viewCompare, opponents: viewOpponents, seasons: viewSeasons, managers: viewManagers, finance: viewFinance, matchday: viewMatchday, matches: viewMatches, ask: viewAsk, data: viewData };
   (views[S.tab] || viewOverview)(mainEl);
 }
 
@@ -1316,14 +1316,23 @@ function importTexts(texts, statusEl, opts = {}) {
   const fail = (msg) => { if (statusEl) { statusEl.className = 'status err'; statusEl.textContent = msg; } return false; };
   const prevSnap = DB && DB.snapshot ? DB.label : null; // replacing the built-in snapshot with a newer file for the same season
   // CSV files (football-data.co.uk) and JSON files (API-Football, StatsBomb) are told apart by content.
-  const csv = [], parsed = [], fb = [], sm = [], evb = [], att = [], hist = [], cupf = [], fin = [];
+  const csv = [], parsed = [], fb = [], sm = [], evb = [], att = [], hist = [], cupf = [], fin = [], mgr = [];
   texts.forEach((f) => {
     const t = f.text.replace(/^﻿/, '').trimStart();
     if (t[0] === '[' || t[0] === '{') { const data = JSON.parse(t); if (smIsBundle(data)) sm.push({ name: f.name, text: f.text, data }); else if (data && data.source === 'touchline-events') evb.push(data); else if (isAttendanceFile(data)) att.push({ name: f.name, text: f.text, data }); else if (isClubHistory(data)) hist.push({ name: f.name, text: f.text, data }); else if (isCupsFile(data)) cupf.push({ name: f.name, text: f.text, data }); else if (isFinanceFile(data)) fin.push({ name: f.name, text: f.text, data }); else parsed.push({ name: f.name, data }); }
+    else if (isManagerFile(t)) mgr.push({ name: f.name, text: t });
     else if (isAttendanceCSV(t)) { const data = attendanceCSV(t); att.push({ name: f.name, text: JSON.stringify(data), data }); }
     else if (fdIsCSV(fdParseCSV(t))) csv.push({ name: f.name, rows: fdParseCSV(t) });
     else if (fbIsHistory(t) || fbIsLeagueTable(t) || fbIsWikiAttendance(t) || fbIsTable(fbParse(t)) || fbIsFixtures(fbParse(t)) || fbIsRecords(fbParse(t))) fb.push({ name: f.name, text: t });
   });
+  // Manager files (history, changes by year, turnover summary) feed the Managers tab
+  if (mgr.length && !csv.length && !parsed.length && !fb.length && !sm.length && !evb.length) {
+    const r = mgr.map((f) => addManagerFile(f.text, f.name)).filter(Boolean);
+    if (!opts.restore) Promise.all(mgr.map(saveManagersFile)).then((ok) => { if (ok.includes(false)) flash('Loaded, but this browser would not save the manager files.', 'err'); });
+    cache.clear(); S.tab = 'managers'; render();
+    flash('Added ' + r.map((x) => x.msg).join('; ') + '; see the Managers tab.');
+    return true;
+  }
   // Club accounts (Companies House) feed the Finances tab, whatever season is open
   if (fin.length && !csv.length && !parsed.length && !fb.length && !sm.length && !evb.length) {
     const r = fin.map((f) => addFinanceFile(f.data));
@@ -1659,6 +1668,7 @@ function boot() {
     await restoreAttendance();
     await restoreClubHistory();
     await restoreFinance();
+    await restoreManagers();
     render();
     if (restored && restored.error) flash(restored.error, 'err');
     else if (restored && STORE.meta) flash(`Restored your saved data: ${STORE.meta.label || STORE.meta.files.join(', ')}${STORE.meta.fbTables ? ` + ${STORE.meta.fbTables} FBref table${STORE.meta.fbTables > 1 ? 's' : ''}` : ''}. Manage it in the Data tab.`);

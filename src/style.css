@@ -341,3 +341,12 @@ textarea { width: 100%; font-family: var(--font-mono); font-size: 12px; line-hei
 .bar-val { font-size: 11px; fill: var(--ink-2); }
 
 td.neg { color: var(--bad); }
+
+/* Managers */
+.mgr-lbl { font-size: 11px; fill: #fff; font-weight: 600; pointer-events: none; }
+.axis-t { font-size: 11px; fill: var(--muted); }
+.mgr-bars { display: grid; gap: 6px; }
+.mgr-bar { display: grid; grid-template-columns: minmax(110px, 180px) 1fr 44px 90px; gap: 10px; align-items: center; font-size: 13px; }
+.mgr-bar .b { height: 12px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
+.mgr-bar .b i { display: block; height: 100%; border-radius: 3px; }
+@media (max-width: 560px) { .mgr-bar { grid-template-columns: 110px 1fr 40px; } .mgr-bar .sub { display: none; } }

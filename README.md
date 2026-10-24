@@ -275,3 +275,13 @@ disagreements are kept and marked † in the Finances tab. Downloads and text ar
 `data/ch-cache/` (not committed); `--parse-only` re-reads the cache, `--retext` rebuilds the text of
 machine-readable filings. Dundee and Falkirk (and St Johnstone before 2023) file small-company accounts
 without a profit and loss account, so only balance-sheet figures exist for those years.
+
+## Managers
+The Managers tab reads the manager history CSV (club, manager, appointment and departure dates with their
+precision, caretaker and joint flags, sources), plus two optional companion files: manager appointments by
+calendar year, and a per-club turnover summary. All three can be dropped in the Data tab (or listed in the
+snapshot manifest as `managers`, `managersByYear`, `managersSummary`). For the selected club it shows the
+current manager, tenure figures, a timeline of every manager over the league finishes, and a table of each
+spell's record: matches between the appointment and departure dates (league results from 1994/95, cups
+where loaded), points per game, first-10-match points, best league finish, and trophies credited to the
+manager in charge when each season ended. Spells dated to the year only get no match record.
