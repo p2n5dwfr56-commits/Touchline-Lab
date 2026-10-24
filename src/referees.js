@@ -150,9 +150,48 @@ function refDetail(k, ms, name, lg) {
   }));
   const rows = Object.values(clubs).filter((c) => c.n >= 3).sort((a, b) => b.n - a.n);
   return card({ title: name(k), span: true }, `${st.n} league matches · ${fmt(st.y, 2)} yellows, ${fmt(st.r, 2)} reds${st.np ? ` and ${fmt(st.p, 2)} penalties` : ''} a game (league ${fmt(lg.y, 2)}, ${fmt(lg.r, 2)}${lg.np ? `, ${fmt(lg.p, 2)}` : ''}) · clubs with 3+ games`, h('div', { class: 'tbl-wrap' }, h('table', null,
-    h('thead', null, h('tr', null, ['Club', 'Games', 'Points a game', 'Their yellows a game', 'Penalties for / against'].map((t, i) => h('th', { class: i === 0 ? 'l' : '', text: t })))),
+    h('thead', null, h('tr', null, ['Club', 'Games', 'Points a game', 'Yellows a game', 'Penalties for / against'].map((t, i) => h('th', { class: i === 0 ? 'l' : '', text: t })))),
     h('tbody', null, rows.map((c) => h('tr', { style: { cursor: 'default' } }, h('td', { class: 'l' }, h('b', { text: c.name })), h('td', { text: c.n }),
-      h('td', { text: (c.pts / c.n).toFixed(2) }), h('td', { text: (c.y / c.n).toFixed(2) }), h('td', { text: c.np ? `${c.p} / ${c.op}` : '–' })))))));
+      h('td', { text: (c.pts / c.n).toFixed(2) }), h('td', { text: (c.y / c.n).toFixed(2) }), h('td', { text: c.np ? `${c.p} / ${c.op}` : '–' })))))),
+    refCupList(k));
+}
+
+// Every cup tie in the loaded data with a named referee (Wikipedia match reports), once each
+function allCupTies() {
+  return memo('allCupTies|' + allSeasons().length + '|' + (SEASONS.real ? (SEASONS.real.cups || []).length : 0), () => {
+    const out = [], seen = new Set(), { canon } = refMatches();
+    allSeasons().forEach((x) => {
+      const db = x.current ? SEASONS.real || x.db : x.db || seasonDB(x.season);
+      if (!db || !db.cups) return;
+      const nm = (id) => (db.teamById && db.teamById[id] ? db.teamById[id].name : id);
+      db.cups.forEach((m) => {
+        if (!m.info || !m.info.ref || !m.date) return;
+        const id = m.date.slice(0, 10) + '|' + fbTeamKey(nm(m.home)) + '|' + fbTeamKey(nm(m.away));
+        if (seen.has(id)) return;
+        seen.add(id);
+        let ref = refKey(m.info.ref);
+        if (canon[ref]) ref = canon[ref];
+        const wc = m.wikiCards, ws = m.wikiScorers, pen = (t) => (ws && ws[t] ? ws[t].filter((g) => /\(p\)/.test(g)).length : null);
+        out.push({ season: x.season, date: m.date.slice(0, 10), ref, round: roundLabel(m), comp: m.comp, home: nm(m.home), away: nm(m.away), score: `${m.hg}–${m.ag}${m.pens ? ` (${m.pens.f}–${m.pens.a} pens)` : ''}`,
+          cards: wc && wc[m.home] && wc[m.away] ? `${wc[m.home].y + wc[m.home].r} / ${wc[m.away].y + wc[m.away].r}` : null, reds: wc && wc[m.home] && wc[m.away] ? wc[m.home].r + wc[m.away].r : 0, pens: ws ? `${pen(m.home)} / ${pen(m.away)}` : null });
+      });
+    });
+    return out.sort((a, b) => b.date.localeCompare(a.date));
+  });
+}
+// One referee's cup ties, newest first
+function refCupList(k) {
+  const l = allCupTies().filter((t) => t.ref === k);
+  if (!l.length) return null;
+  const comps = {};
+  l.forEach((t) => { comps[t.comp] = (comps[t.comp] || 0) + 1; });
+  return h('div', { style: { marginTop: '16px' } },
+    h('div', { class: 'eyebrow', style: { marginBottom: '6px' }, text: `Cup ties · ${l.length} (${Object.entries(comps).sort((a, b) => b[1] - a[1]).map(([c, n]) => n + ' ' + c).join(', ')})` }),
+    h('div', { class: 'tbl-wrap' }, h('table', null,
+      h('thead', null, h('tr', null, ['Date', 'Round', 'Match', 'Score', 'Cards (home / away)', 'Penalties scored'].map((t, i) => h('th', { class: i <= 2 ? 'l' : '', text: t })))),
+      h('tbody', null, l.slice(0, 30).map((t) => h('tr', { style: { cursor: 'default' } }, h('td', { class: 'l sub', text: fmtDate(t.date) + ' ' + t.date.slice(0, 4) }), h('td', { class: 'l', text: t.round }),
+        h('td', { class: 'l', text: `${t.home} v ${t.away}` }), h('td', null, h('b', { text: t.score })), h('td', { text: t.cards ? t.cards + (t.reds ? ` (${t.reds} red)` : '') : '–' }), h('td', { text: t.pens || '–' })))))),
+    h('p', { class: 'note', text: 'Cup ties from the Wikipedia match reports loaded (Aberdeen’s, 2010/11 on), so only ties involving that club appear. Cards where the report lists them; penalties are those scored.' + (l.length > 30 ? ` Showing the latest 30 of ${l.length}.` : '') }));
 }
 
 // Your club and the referees: the "conspiracy" table
