@@ -325,6 +325,16 @@ function attendanceCSV(text) {
 }
 const isAttendanceCSV = (text) => !!attendanceCSV(text) && !fdIsCSV(fdParseCSV(text));
 
+// Club histories from tools/fetch-wiki-club-seasons.mjs (Wikipedia "List of <club> seasons"): club key -> { from, url, seasons: { '1983/84': row } }
+const CLUBHIST = {};
+const isClubHistory = (d) => d && d.source === 'touchline-club-history' && Array.isArray(d.seasons);
+function addClubHistory(d) {
+  const k = fbTeamKey(d.club);
+  const H = (CLUBHIST[k] = CLUBHIST[k] || { club: d.club, from: d.from, url: d.url, seasons: {} });
+  d.seasons.forEach((r) => { if (r && r.season) H.seasons[r.season] = r; });
+  return { club: d.club, seasons: d.seasons.length, first: d.seasons.length ? d.seasons[0].season : '' };
+}
+
 function noteHistoryAttendance(db) {
   Object.entries(db.fbHistory || {}).forEach(([key, Hh]) => Object.entries(Hh.league || {}).forEach(([season, f]) => {
     if (f.att == null || f.att <= 0) return;

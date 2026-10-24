@@ -197,3 +197,13 @@ async function restoreAttendance() {
   if (SNAP && SNAP.attendance) [].concat(SNAP.attendance).forEach(addAttendanceFile);
   ((await storeGet('attendance')) || []).forEach((f) => { try { addAttendanceFile(JSON.parse(f.text)); } catch (e) { /* skip a damaged file */ } });
 }
+
+/* Club histories (Wikipedia season lists), kept apart from the season logs */
+async function saveClubHistory(f) {
+  const list = ((await storeGet('clubhist')) || []).filter((x) => x.name !== f.name).concat({ name: f.name, text: f.text });
+  return storeSet('clubhist', list);
+}
+async function restoreClubHistory() {
+  if (SNAP && SNAP.clubHistory) [].concat(SNAP.clubHistory).forEach(addClubHistory);
+  ((await storeGet('clubhist')) || []).forEach((f) => { try { addClubHistory(JSON.parse(f.text)); } catch (e) { /* skip a damaged file */ } });
+}

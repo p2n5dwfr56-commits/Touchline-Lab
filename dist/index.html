@@ -1907,6 +1907,16 @@ function attendanceCSV(text) {
 }
 const isAttendanceCSV = (text) => !!attendanceCSV(text) && !fdIsCSV(fdParseCSV(text));
 
+// Club histories from tools/fetch-wiki-club-seasons.mjs (Wikipedia "List of <club> seasons"): club key -> { from, url, seasons: { '1983/84': row } }
+const CLUBHIST = {};
+const isClubHistory = (d) => d && d.source === 'touchline-club-history' && Array.isArray(d.seasons);
+function addClubHistory(d) {
+  const k = fbTeamKey(d.club);
+  const H = (CLUBHIST[k] = CLUBHIST[k] || { club: d.club, from: d.from, url: d.url, seasons: {} });
+  d.seasons.forEach((r) => { if (r && r.season) H.seasons[r.season] = r; });
+  return { club: d.club, seasons: d.seasons.length, first: d.seasons.length ? d.seasons[0].season : '' };
+}
+
 function noteHistoryAttendance(db) {
   Object.entries(db.fbHistory || {}).forEach(([key, Hh]) => Object.entries(Hh.league || {}).forEach(([season, f]) => {
     if (f.att == null || f.att <= 0) return;
@@ -3687,14 +3697,23 @@ function importTexts(texts, statusEl, opts = {}) {
   const fail = (msg) => { if (statusEl) { statusEl.className = 'status err'; statusEl.textContent = msg; } return false; };
   const prevSnap = DB && DB.snapshot ? DB.label : null; // replacing the built-in snapshot with a newer file for the same season
   // CSV files (football-data.co.uk) and JSON files (API-Football, StatsBomb) are told apart by content.
-  const csv = [], parsed = [], fb = [], sm = [], evb = [], att = [];
+  const csv = [], parsed = [], fb = [], sm = [], evb = [], att = [], hist = [];
   texts.forEach((f) => {
     const t = f.text.replace(/^﻿/, '').trimStart();
-    if (t[0] === '[' || t[0] === '{') { const data = JSON.parse(t); if (smIsBundle(data)) sm.push({ name: f.name, text: f.text, data }); else if (data && data.source === 'touchline-events') evb.push(data); else if (isAttendanceFile(data)) att.push({ name: f.name, text: f.text, data }); else parsed.push({ name: f.name, data }); }
+    if (t[0] === '[' || t[0] === '{') { const data = JSON.parse(t); if (smIsBundle(data)) sm.push({ name: f.name, text: f.text, data }); else if (data && data.source === 'touchline-events') evb.push(data); else if (isAttendanceFile(data)) att.push({ name: f.name, text: f.text, data }); else if (isClubHistory(data)) hist.push({ name: f.name, text: f.text, data }); else parsed.push({ name: f.name, data }); }
     else if (isAttendanceCSV(t)) { const data = attendanceCSV(t); att.push({ name: f.name, text: JSON.stringify(data), data }); }
     else if (fdIsCSV(fdParseCSV(t))) csv.push({ name: f.name, rows: fdParseCSV(t) });
     else if (fbIsHistory(t) || fbIsLeagueTable(t) || fbIsWikiAttendance(t) || fbIsTable(fbParse(t)) || fbIsFixtures(fbParse(t)) || fbIsRecords(fbParse(t))) fb.push({ name: f.name, text: t });
   });
+  // Club histories (Wikipedia season lists) add the club's whole league record to the Seasons tab
+  if (hist.length && !csv.length && !parsed.length && !fb.length && !sm.length && !evb.length) {
+    const r = hist.map((f) => addClubHistory(f.data));
+    if (!opts.restore) Promise.all(hist.map((f) => saveClubHistory(f))).then((ok) => { if (ok.includes(false)) flash('Loaded, but this browser would not save the club history.', 'err'); });
+    cache.clear();
+    S.tab = 'seasons'; render();
+    flash(r.map((x) => `Added ${x.club}’s league history: ${x.seasons} seasons from ${x.first}`).join('. ') + ' (see the Seasons tab).');
+    return true;
+  }
   // Attendance files add to every season's attendance chart, whatever is loaded
   if (att.length && !csv.length && !parsed.length && !fb.length && !sm.length && !evb.length) {
     const r = att.map((f) => addAttendanceFile(f.data));
@@ -3996,6 +4015,7 @@ function boot() {
     if (!(restored && restored.ok)) loadSnapshot(); // no saved imports: open on the built-in real data, if this build has it
     await refreshSeasons();
     await restoreAttendance();
+    await restoreClubHistory();
     render();
     if (restored && restored.error) flash(restored.error, 'err');
     else if (restored && STORE.meta) flash(`Restored your saved data: ${STORE.meta.label || STORE.meta.files.join(', ')}${STORE.meta.fbTables ? ` + ${STORE.meta.fbTables} FBref table${STORE.meta.fbTables > 1 ? 's' : ''}` : ''}. Manage it in the Data tab.`);
@@ -5095,49 +5115,73 @@ function viewSeasons(el) {
   const key = fbTeamKey(teamName(S.team));
   const all = allSeasons();
   const H = ((SEASONS.real && SEASONS.real.fbHistory) || DB.fbHistory || {})[key] || null; // FBref club history, when pasted
-  el.append(h('div', { class: 'hero' }, h('h1', { text: teamName(S.team) }), h('div', { class: 'meta' }, h('span', { text: Math.max(all.length, H ? Object.keys(H.league).length : 0) + ' seasons · league only' }))));
-  if (all.length < 2 && !H) {
+  const W = CLUBHIST[key] || null; // Wikipedia's list of the club's seasons, when loaded
+  if (all.length < 2 && !H && !W) {
     el.append(card({ title: 'Seasons', span: true }, null, h('p', { class: 'note', style: { marginTop: 0 }, text: 'Only one season is loaded. Add earlier seasons in the Data tab (football-data.co.uk files, free) to compare them here.' })));
     return;
   }
-  const rows = memo('seasons|' + key + '|' + all.length + '|' + (SEASONS.real ? SEASONS.real.matches.length : 0) + '|' + (H ? Object.keys(H.league).length : 0), () => {
+  const rows = memo('seasons|' + key + '|' + all.length + '|' + (SEASONS.real ? SEASONS.real.matches.length : 0) + '|' + (H ? Object.keys(H.league).length : 0) + '|' + (W ? Object.keys(W.seasons).length : 0), () => {
     const out = all.map((x) => ({ ...x, r: seasonRow(x.db || seasonDB(x.season), key) })).filter((x) => x.r);
     // Older seasons from FBref's club history: results only
     if (H) Object.entries(H.league).forEach(([season, f]) => {
       if (out.some((x) => x.season === season) || f.mp == null) return;
       out.push({ season, fbOnly: true, r: { pos: f.pos, of: null, race: [], players: false, champ: null, a: { n: f.mp, w: f.w, d: f.d, l: f.l, g: f.gf, ga: f.ga, pts: f.pts, mxp: NaN, sh: NaN, sha: NaN, xg: NaN, xga: NaN } } });
     });
+    // Older still, from Wikipedia's list of the club's seasons: record, position, cups, top scorer
+    if (W) Object.values(W.seasons).forEach((w) => {
+      if (out.some((x) => x.season === w.season)) return;
+      if (w.pld == null) { out.push({ season: w.season, histOnly: 'Wikipedia', noteRow: w.note || w.division }); return; }
+      out.push({ season: w.season, histOnly: 'Wikipedia', div: w.division, r: { pos: parseInt(w.pos, 10) || null, of: null, race: [], players: false, champ: parseInt(w.pos, 10) === 1 ? teamName(S.team) : null, a: { n: w.pld, w: w.w, d: w.d, l: w.l, g: w.gf, ga: w.ga, pts: w.pts, mxp: NaN, sh: NaN, sha: NaN, xg: NaN, xga: NaN } } });
+    });
     return out.sort((a, b) => b.season.localeCompare(a.season));
   });
+  el.append(h('div', { class: 'hero' }, h('h1', { text: teamName(S.team) }), h('div', { class: 'meta' }, h('span', { text: rows.filter((x) => !x.noteRow).length + ' league seasons' + (rows.length ? ' · ' + rows[rows.length - 1].season + ' to ' + rows[0].season : '') }))));
   if (!rows.length) { el.append(card({ title: 'Seasons', span: true }, null, h('p', { class: 'note', text: teamName(S.team) + ' is not in the other seasons loaded.' }))); return; }
   const grid = h('div', { class: 'grid' });
   el.append(grid);
   const A = css('--team-a');
-  const asc = rows.slice().reverse();
+  const asc = rows.filter((x) => !x.noteRow).slice().reverse();
+  const lrows = rows.filter((x) => !x.noteRow);
 
   // Table
-  const showMkt = rows.some((x) => has(x.r.a.mxp)), showXg = rows.some((x) => has(x.r.a.xg));
-  const hl = (x) => (H && H.league[x.season]) || null, hs = (x) => (H && H.summary[x.season]) || null;
+  const showMkt = lrows.some((x) => has(x.r.a.mxp)), showXg = lrows.some((x) => has(x.r.a.xg));
+  const hl = (x) => (H && H.league[x.season]) || null, hs = (x) => (H && H.summary[x.season]) || null, hw = (x) => (W && W.seasons[x.season]) || null;
   const att = (v) => (v == null ? '–' : v < 500 ? 'closed doors' : v.toLocaleString('en-GB'));
-  const head = ['Season', 'Pos', 'P', 'W', 'D', 'L', 'GF', 'GA', 'GD', 'Pts', 'PPG'].concat(showMkt ? ['Mkt xPts / g'] : [], ['Shots / g', 'Shots ag / g'], showXg ? ['xG / g', 'xGA / g'] : [], H ? ['Top scorer', 'Avg attendance', 'In Europe', 'Qualified for'] : [], ['Champions', '']);
+  const attOf = (x) => { const a = ATT[x.season] && ATT[x.season][key]; const f = hl(x); return a ? att(a.att) : f ? att(f.att) : '–'; };
+  const scorerOf = (x) => { const f = hl(x), w = hw(x); return f && f.scorer ? f.scorer : w && w.scorers ? w.scorers + (w.goals != null ? ' - ' + w.goals : '') : '–'; };
+  const ppg3 = (a) => safe(3 * a.w + a.d, a.n); // 3 points for a win in every era, so seasons compare
+  const hasHist = !!(H || W);
+  const head = ['Season', 'Pos', 'P', 'W', 'D', 'L', 'GF', 'GA', 'GD', 'Pts', 'PPG'].concat(showMkt ? ['Mkt xPts / g'] : [], ['Shots / g', 'Shots ag / g'], showXg ? ['xG / g', 'xGA / g'] : [], hasHist ? ['Top league scorer', 'Avg attendance'] : [], W ? ['Scottish Cup', 'League Cup'] : [], hasHist ? ['In Europe'] : [], H ? ['Qualified for'] : [], ['Champions', '']);
+  const ncol = head.length;
   grid.append(card({ title: 'Season by season', span: true }, `${teamName(S.team)} in the league · positions follow the split after 33 rounds · click a season to open it in every tab`,
     h('div', { class: 'tbl-wrap' }, h('table', null, h('thead', null, h('tr', null, head.map((c, i) => h('th', { class: i === 0 || i === head.length - 2 ? 'l' : '', text: c })))),
       h('tbody', null, rows.map((x) => {
+        if (x.noteRow) return h('tr', { style: { cursor: 'default' } }, h('td', { class: 'l' }, h('b', { text: x.season })), h('td', { class: 'l sub', colspan: ncol - 1, text: x.noteRow }));
         const a = x.r.a, g = (v, d) => fmt(safe(v, a.n), d);
-        const f = hl(x), su = hs(x);
-        return h('tr', { class: x.season === DB.season ? 'focus' : '', style: x.fbOnly ? { cursor: 'default' } : null, onclick: x.fbOnly ? null : () => { if (loadSeason(x.season)) { S.tab = 'overview'; render(); window.scrollTo({ top: 0 }); } }, title: x.fbOnly ? x.season + ' (from FBref: results only)' : 'Open ' + x.season },
-          h('td', { class: 'l' }, h('b', { text: x.season }), x.current ? h('span', { class: 'sub', text: ' now' }) : x.fbOnly ? h('span', { class: 'sub', text: ' FBref' }) : null), h('td', null, h('b', { text: x.r.pos ? ordinal(x.r.pos) : '–' })),
-          h('td', { text: a.n }), h('td', { text: a.w }), h('td', { text: a.d }), h('td', { text: a.l }), h('td', { text: a.g }), h('td', { text: a.ga }), h('td', { text: signed(a.g - a.ga, 0) }), h('td', null, h('b', { text: a.pts })), h('td', { text: g(a.pts, 2) }),
+        const f = hl(x), su = hs(x), w = hw(x);
+        const lower = x.div && !/prem|spl|div(ision)? ?(1|a|one)\b|sco div 1/i.test(x.div) ? ' (' + x.div.replace(/^sco\s*/i, '') + ')' : '';
+        const old = x.fbOnly || x.histOnly;
+        return h('tr', { class: x.season === DB.season ? 'focus' : '', style: old ? { cursor: 'default' } : null, onclick: old ? null : () => { if (loadSeason(x.season)) { S.tab = 'overview'; render(); window.scrollTo({ top: 0 }); } }, title: old ? x.season + ' (from ' + (x.histOnly || 'FBref') + ': league record only)' : 'Open ' + x.season },
+          h('td', { class: 'l' }, h('b', { text: x.season }), x.current ? h('span', { class: 'sub', text: ' now' }) : old ? h('span', { class: 'sub', text: lower || '' }) : null), h('td', null, h('b', { text: x.r.pos ? ordinal(x.r.pos) : '–' })),
+          h('td', { text: a.n }), h('td', { text: a.w }), h('td', { text: a.d }), h('td', { text: a.l }), h('td', { text: a.g }), h('td', { text: a.ga }), h('td', { text: signed(a.g - a.ga, 0) }), h('td', null, h('b', { text: a.pts })), h('td', { text: fmt(ppg3(a), 2) }),
           showMkt ? h('td', { text: g(a.mxp, 2) }) : null, h('td', { text: g(a.sh, 1) }), h('td', { text: g(a.sha, 1) }), showXg ? [h('td', { text: g(a.xg, 2) }), h('td', { text: g(a.xga, 2) })] : null,
-          H ? [h('td', { class: 'l', text: f ? f.scorer || '–' : '–' }), h('td', { text: f ? att(f.att) : '–' }), h('td', { class: 'l sub', text: su && su.europe ? su.europe : '' }), h('td', { class: 'l sub', text: f && f.notes ? f.notes.replace(/^→\s*/, '') : '' })] : null,
+          hasHist ? [h('td', { class: 'l', text: scorerOf(x) }), h('td', { text: attOf(x) })] : null,
+          W ? [h('td', { class: 'sub', text: w ? w.scottishCup || '' : '' }), h('td', { class: 'sub', text: w ? w.leagueCup || '' : '' })] : null,
+          hasHist ? h('td', { class: 'l sub', text: su && su.europe ? su.europe : w && w.europe ? w.europe : '' }) : null,
+          H ? h('td', { class: 'l sub', text: f && f.notes ? f.notes.replace(/^→\s*/, '') : '' }) : null,
           h('td', { class: 'l sub', text: (x.r.champ || '') + (x.current && x.r.champ ? ' (leading)' : '') }), h('td', { class: 'sub', text: x.r.players ? 'players' : '' }));
       })))),
-    h('p', { class: 'note', text: 'Seasons marked “players” also have line-ups and player stats (from Sportmonks). Past seasons from football-data.co.uk have no xG. 2019/20 ended early (Covid), so it has fewer matches.' + (H ? ' Top scorers, attendances and European runs are from FBref’s club history; seasons marked FBref have results only. 2020/21 was played behind closed doors.' : '') })));
+    h('p', { class: 'note', text: 'Seasons marked “players” also have line-ups and player stats (from Sportmonks). Past seasons from football-data.co.uk have no xG. 2019/20 ended early (Covid), so it has fewer matches.' + (hasHist ? ' Top scorers, cup runs and European runs are from FBref’s club history and Wikipedia’s list of the club’s seasons; attendances from your attendance CSV. Seasons before 1994/95 have the league record only. PPG counts 3 points for a win in every season so eras compare (2 points were given before 1994/95; Pts shows what was awarded). 2020/21 was played behind closed doors.' : '') })));
 
   // League finishes, and European campaigns (FBref club history)
+  // Every season with a position, top flight only (a second-tier finish isn't comparable)
+  const fin = asc.filter((x) => x.r.pos && !(x.div && /div 2|second|division two|div b/i.test(x.div))).map((x) => {
+    const f = hl(x), w = hw(x);
+    const notes = f && f.notes ? f.notes : w && w.europe ? '' : '';
+    return [x.season, { pos: x.r.pos, pts: x.r.a.pts, mp: x.r.a.n, w: x.r.a.w, d: x.r.a.d, l: x.r.a.l, scorer: scorerOf(x) === '–' ? '' : scorerOf(x), notes, title: x.r.pos === 1 }];
+  });
+  if (fin.length >= 3) grid.append(card({ title: 'League finishes', span: true }, `${teamName(S.team)}’s final league position, ${fin[0][0]} to ${fin[fin.length - 1][0]}`, positionChart(fin)));
   if (H) {
-    const fin = Object.entries(H.league).filter(([, f]) => f.pos).sort((a, b) => a[0].localeCompare(b[0]));
-    if (fin.length >= 3) grid.append(card({ title: 'League finishes', span: true }, `${teamName(S.team)}’s final league position, ${fin[0][0]} to ${fin[fin.length - 1][0]} · from FBref`, positionChart(fin)));
     const eu = Object.keys(H.summary).concat(Object.keys(H.europe)).filter((k, i, arr) => arr.indexOf(k) === i && ((H.summary[k] && H.summary[k].europe) || H.europe[k])).sort().reverse();
     if (eu.length) grid.append(card({ title: 'In Europe', span: true }, `${teamName(S.team)}’s European campaigns · from FBref (match records only where FBref has them)`, h('div', { class: 'tbl-wrap' }, h('table', null,
       h('thead', null, h('tr', null, ['Season', 'How far', 'Group / league phase', 'P', 'W', 'D', 'L', 'GF', 'GA', 'Top scorer'].map((c, i) => h('th', { class: i <= 2 || i === 9 ? 'l' : '', text: c })))),
@@ -5175,7 +5219,7 @@ function viewSeasons(el) {
   c2.append(legend([['Scored', A, 'line'], ['Conceded', B, 'line line-dash']]));
 
   // Points race: this season against earlier ones, match by match
-  const raceRows = rows.filter((x) => x.r.race && x.r.race.length);
+  const raceRows = lrows.filter((x) => x.r.race && x.r.race.length);
   if (raceRows.length < 2) return;
   const pick = raceRows.slice(0, S.raceN === 'all' ? raceRows.length : 5);
   const n = Math.max(...pick.map((x) => x.r.race.length));
@@ -5198,7 +5242,7 @@ function viewSeasons(el) {
   }
 
   // Players across seasons (seasons with Sportmonks player stats)
-  const withP = rows.filter((x) => x.r.players);
+  const withP = lrows.filter((x) => x.r.players);
   if (withP.length >= 2) playersAcross(grid, withP.slice().reverse());
 }
 
@@ -5254,19 +5298,22 @@ function positionChart(fin) {
   const X = (i) => m.l + (n <= 1 ? (W - m.l - m.r) / 2 : (i * (W - m.l - m.r)) / (n - 1)), Y = (p) => m.t + ((p - 1) * (Hh - m.t - m.b)) / (maxP - 1);
   const svg = sv('svg', { viewBox: `0 0 ${W} ${Hh}`, width: '100%', role: 'img', 'aria-label': 'League position by season' });
   const ax = sv('g', { class: 'axis' });
-  [1, 3, 6, 9, 12].filter((p) => p <= maxP).forEach((p) => { ax.append(sv('line', { x1: m.l, x2: W - m.r, y1: Y(p), y2: Y(p), class: p === 6 ? 'baseline' : 'grid-line' })); ax.append(sv('text', { x: m.l - 6, y: Y(p) + 4, 'text-anchor': 'end', text: ordinal(p) })); });
+  [1, 3, 6, 9, 12, 15, 18].filter((p) => p <= maxP).forEach((p) => { ax.append(sv('line', { x1: m.l, x2: W - m.r, y1: Y(p), y2: Y(p), class: p === 6 ? 'baseline' : 'grid-line' })); ax.append(sv('text', { x: m.l - 6, y: Y(p) + 4, 'text-anchor': 'end', text: ordinal(p) })); });
   const every = Math.max(1, Math.ceil(n / 14));
   fin.forEach(([k], i) => { if (i % every === 0 || i === n - 1) ax.append(sv('text', { x: X(i), y: Hh - 8, 'text-anchor': 'middle', text: seasonShort(k) })); });
   svg.append(ax);
   const A = css('--team-a');
-  svg.append(sv('path', { d: fin.map(([, f], i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(f.pos).toFixed(1)).join(''), fill: 'none', stroke: A, 'stroke-width': 2, 'stroke-linejoin': 'round' }));
+  const yr = (k) => parseInt(k, 10); // break the line over missing seasons (the wars)
+  svg.append(sv('path', { d: fin.map(([k, f], i) => (i && yr(k) - yr(fin[i - 1][0]) === 1 ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(f.pos).toFixed(1)).join(''), fill: 'none', stroke: A, 'stroke-width': 2, 'stroke-linejoin': 'round' }));
   fin.forEach(([k, f], i) => {
     const eu = /europa|uefa|conference|champions/i.test(f.notes || '');
-    const dot = sv('circle', { cx: X(i), cy: Y(f.pos), r: eu ? 5.5 : 4, fill: eu ? A : css('--surface'), stroke: A, 'stroke-width': 2, tabindex: 0 });
+    const won = f.pos === 1, gold = css('--warn');
+    const dot = sv('circle', { cx: X(i), cy: Y(f.pos), r: won ? 6.5 : eu ? 5.5 : n > 60 ? 2.6 : 4, fill: won ? gold : eu ? A : css('--surface'), stroke: won ? gold : A, 'stroke-width': 2, tabindex: 0 });
     hover(dot, () => [{ v: k + ' · ' + ordinal(f.pos), strong: true }, { v: `${f.pts} pts from ${f.mp} · ${f.w}-${f.d}-${f.l}` }, f.scorer ? { v: 'Top scorer ' + f.scorer } : null, f.notes ? { v: f.notes.replace(/^→\s*/, 'Qualified: ') } : null].filter(Boolean));
     svg.append(dot);
   });
-  return h('div', null, svg, legend([['League position', A, 'line'], ['Qualified for Europe', A]]), h('p', { class: 'note', text: 'Line at 6th marks the top-six split (since 2000/01 the top flight has split after 33 rounds).' }));
+  const anyEu = fin.some(([, f]) => /europa|uefa|conference|champions/i.test(f.notes || ''));
+  return h('div', null, svg, legend([['League position', A, 'line'], ['League champions', css('--warn')]].concat(anyEu ? [['Qualified for Europe (from 2000/01)', A]] : [])), h('p', { class: 'note', text: 'The line at 6th marks the top-six split, used since 2000/01. Earlier top flights had 10 to 20 clubs. Seasons outside the top flight are left out.' }));
 }
 
 // Same club, same player id (club + name), each season's totals
@@ -6032,5 +6079,15 @@ async function saveAttendanceFile(f) {
 async function restoreAttendance() {
   if (SNAP && SNAP.attendance) [].concat(SNAP.attendance).forEach(addAttendanceFile);
   ((await storeGet('attendance')) || []).forEach((f) => { try { addAttendanceFile(JSON.parse(f.text)); } catch (e) { /* skip a damaged file */ } });
+}
+
+/* Club histories (Wikipedia season lists), kept apart from the season logs */
+async function saveClubHistory(f) {
+  const list = ((await storeGet('clubhist')) || []).filter((x) => x.name !== f.name).concat({ name: f.name, text: f.text });
+  return storeSet('clubhist', list);
+}
+async function restoreClubHistory() {
+  if (SNAP && SNAP.clubHistory) [].concat(SNAP.clubHistory).forEach(addClubHistory);
+  ((await storeGet('clubhist')) || []).forEach((f) => { try { addClubHistory(JSON.parse(f.text)); } catch (e) { /* skip a damaged file */ } });
 }
 </script>

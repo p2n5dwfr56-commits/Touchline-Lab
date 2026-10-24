@@ -1307,14 +1307,23 @@ function importTexts(texts, statusEl, opts = {}) {
   const fail = (msg) => { if (statusEl) { statusEl.className = 'status err'; statusEl.textContent = msg; } return false; };
   const prevSnap = DB && DB.snapshot ? DB.label : null; // replacing the built-in snapshot with a newer file for the same season
   // CSV files (football-data.co.uk) and JSON files (API-Football, StatsBomb) are told apart by content.
-  const csv = [], parsed = [], fb = [], sm = [], evb = [], att = [];
+  const csv = [], parsed = [], fb = [], sm = [], evb = [], att = [], hist = [];
   texts.forEach((f) => {
     const t = f.text.replace(/^﻿/, '').trimStart();
-    if (t[0] === '[' || t[0] === '{') { const data = JSON.parse(t); if (smIsBundle(data)) sm.push({ name: f.name, text: f.text, data }); else if (data && data.source === 'touchline-events') evb.push(data); else if (isAttendanceFile(data)) att.push({ name: f.name, text: f.text, data }); else parsed.push({ name: f.name, data }); }
+    if (t[0] === '[' || t[0] === '{') { const data = JSON.parse(t); if (smIsBundle(data)) sm.push({ name: f.name, text: f.text, data }); else if (data && data.source === 'touchline-events') evb.push(data); else if (isAttendanceFile(data)) att.push({ name: f.name, text: f.text, data }); else if (isClubHistory(data)) hist.push({ name: f.name, text: f.text, data }); else parsed.push({ name: f.name, data }); }
     else if (isAttendanceCSV(t)) { const data = attendanceCSV(t); att.push({ name: f.name, text: JSON.stringify(data), data }); }
     else if (fdIsCSV(fdParseCSV(t))) csv.push({ name: f.name, rows: fdParseCSV(t) });
     else if (fbIsHistory(t) || fbIsLeagueTable(t) || fbIsWikiAttendance(t) || fbIsTable(fbParse(t)) || fbIsFixtures(fbParse(t)) || fbIsRecords(fbParse(t))) fb.push({ name: f.name, text: t });
   });
+  // Club histories (Wikipedia season lists) add the club's whole league record to the Seasons tab
+  if (hist.length && !csv.length && !parsed.length && !fb.length && !sm.length && !evb.length) {
+    const r = hist.map((f) => addClubHistory(f.data));
+    if (!opts.restore) Promise.all(hist.map((f) => saveClubHistory(f))).then((ok) => { if (ok.includes(false)) flash('Loaded, but this browser would not save the club history.', 'err'); });
+    cache.clear();
+    S.tab = 'seasons'; render();
+    flash(r.map((x) => `Added ${x.club}’s league history: ${x.seasons} seasons from ${x.first}`).join('. ') + ' (see the Seasons tab).');
+    return true;
+  }
   // Attendance files add to every season's attendance chart, whatever is loaded
   if (att.length && !csv.length && !parsed.length && !fb.length && !sm.length && !evb.length) {
     const r = att.map((f) => addAttendanceFile(f.data));
@@ -1616,6 +1625,7 @@ function boot() {
     if (!(restored && restored.ok)) loadSnapshot(); // no saved imports: open on the built-in real data, if this build has it
     await refreshSeasons();
     await restoreAttendance();
+    await restoreClubHistory();
     render();
     if (restored && restored.error) flash(restored.error, 'err');
     else if (restored && STORE.meta) flash(`Restored your saved data: ${STORE.meta.label || STORE.meta.files.join(', ')}${STORE.meta.fbTables ? ` + ${STORE.meta.fbTables} FBref table${STORE.meta.fbTables > 1 ? 's' : ''}` : ''}. Manage it in the Data tab.`);

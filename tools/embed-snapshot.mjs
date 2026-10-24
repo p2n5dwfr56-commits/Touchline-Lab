@@ -34,6 +34,7 @@ const snap = {
   asOf: m.asOf, primary: m.primary.map(file), fbref: (m.fbref || []).map((f) => ({ team: f.team, texts: f.files.map(file) })), layers: (m.layers || []).map(file),
   // Older seasons: Sportmonks files are reduced to each player's season totals (p.summarise)
   // Attendance files, first one wins where they overlap (your own figures before Wikipedia's)
+  clubHistory: [].concat(m.clubHistory || []).filter((f) => existsSync(join(dir, f))).map((f) => JSON.parse(readFileSync(join(dir, f), 'utf8'))),
   attendance: [].concat(m.attendance || []).filter((f) => existsSync(join(dir, f))).map((f) => JSON.parse(readFileSync(join(dir, f), 'utf8'))),
   past: (m.past || []).map((p) => ({ season: p.season, primary: p.files.map(file), layers: (p.layers || []).map(file),
     summary: (p.summarise || []).some((f) => existsSync(join(dir, f))) ? nonEmpty(seasonSummary(readFileSync(join(dir, p.files[0]), 'utf8'), p.summarise.filter((f) => existsSync(join(dir, f))).map((f) => readFileSync(join(dir, f), 'utf8')))) : undefined })),

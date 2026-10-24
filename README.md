@@ -233,3 +233,12 @@ Premiership since). Player season totals come from Sportmonks: minutes, goals, a
 2010/11 (2009/10 partly), full player stats from 2019/20. Key players' longest period covers every season
 with player data; shortened names in older seasons ("A. Rooney") merge into the full name when one player
 at the club matches.
+
+## Club history back to 1904
+`tools/fetch-wiki-club-seasons.mjs --page "List of Aberdeen F.C. seasons" --club Aberdeen` reads Wikipedia's
+list of a club's seasons (merged cells handled) into one file: division, record, position, Scottish Cup,
+League Cup, Europe and top league scorer(s) for every season, with wartime years noted. Snapshot builds
+carry Aberdeen's (`clubHistory` in the manifest); the Data tab accepts the file for other clubs. The Seasons
+table then runs from 1904/05: older seasons show the league record, cups and top scorer, PPG counts 3 points
+for a win in every era, and League finishes marks league titles. Attendances come from the supplied CSV
+(1976/77 on; partial-coverage averages are left out).
