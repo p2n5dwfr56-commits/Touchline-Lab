@@ -105,21 +105,32 @@ function spellRecord(sp, key, all, opts = {}) {
   const ms = sp.approx ? [] : all.filter((x) => x.date >= sp.start && x.date <= sp.to && (opts.cups !== false || !x.cup));
   let w = 0, d = 0, l = 0, gf = 0, ga = 0;
   const res = ms.map((x) => { const r = result(x.m, x.T); if (r === 'W') w++; else if (r === 'D') d++; else l++; gf += goalsFor(x.m, x.T); ga += goalsAg(x.m, x.T); return r; });
-  const n = ms.length, pts = (rs) => rs.reduce((t, r) => t + (r === 'W' ? 3 : r === 'D' ? 1 : 0), 0);
+  const pts = (rs) => rs.reduce((t, r) => t + (r === 'W' ? 3 : r === 'D' ? 1 : 0), 0);
+  let n = ms.length, p3 = pts(res);
   // Seasons that ended (31 May) while in charge: final league position and trophies
   const P = seasonPositions(), H = CLUBHIST[key];
-  const finishes = [], trophies = [];
+  const finishes = [], trophies = [], histSeasons = [], partSeasons = [];
+  const matchSeasons = new Set(all.filter((x) => !x.cup).map((x) => x.season));
   for (let y = parseInt(sp.start, 10); y <= parseInt(sp.to, 10); y++) {
     const endDay = y + '-05-20', season = (y - 1) + '/' + String(y % 100).padStart(2, '0');
+    const hs = H && H.seasons[season];
+    // Before match-by-match results: a whole league season in charge counts from the club history's record
+    if (!matchSeasons.has(season) && hs && hs.pld != null && y - 1 >= 1975) {
+      if (sp.start <= (y - 1) + '-08-10' && sp.to >= y + '-05-01') {
+        n += hs.pld; w += hs.w || 0; d += hs.d || 0; l += hs.l || 0; gf += hs.gf || 0; ga += hs.ga || 0; p3 += 3 * (hs.w || 0) + (hs.d || 0);
+        histSeasons.push(season);
+      } else if (sp.start < y + '-05-01' && sp.to > (y - 1) + '-08-10') partSeasons.push(season);
+    }
     if (endDay < sp.start || endDay > sp.to) continue;
     const pos = P[season] && P[season][key];
     if (pos) finishes.push({ season, pos: pos.pos });
-    const hs = H && H.seasons[season];
     if (pos && pos.pos === 1) trophies.push('League ' + season);
     if (hs && /^(w|winners?)$/i.test(hs.scottishCup || '')) trophies.push('Scottish Cup ' + season);
     if (hs && /^(w|winners?)$/i.test(hs.leagueCup || '')) trophies.push('League Cup ' + season);
+    // European trophies ("Cup Winners' Cup · Winners; Super Cup · Winners")
+    if (hs && hs.europe) String(hs.europe).split(/;/).forEach((part) => { const m2 = part.match(/^\s*(.+?)\s*[·–-]\s*(W|Winners?)\s*$/i); if (m2 && !/challenge cup/i.test(m2[1])) trophies.push(m2[1].trim() + ' ' + season); });
   }
-  return { n, w, d, l, gf, ga, ppg: n ? pts(res) / n : NaN, first10: n >= 10 ? pts(res.slice(0, 10)) / 10 : NaN, last10: n >= 10 ? pts(res.slice(-10)) / 10 : NaN, res, ms, finishes, trophies, best: finishes.length ? Math.min(...finishes.map((f) => f.pos)) : null };
+  return { n, w, d, l, gf, ga, ppg: n ? p3 / n : NaN, first10: res.length >= 10 ? pts(res.slice(0, 10)) / 10 : NaN, last10: res.length >= 10 ? pts(res.slice(-10)) / 10 : NaN, res, ms, finishes, trophies, histSeasons, partSeasons, best: finishes.length ? Math.min(...finishes.map((f) => f.pos)) : null };
 }
 
 function viewManagers(el) {
@@ -172,12 +183,12 @@ function viewManagers(el) {
           h('td', { class: 'l' }, h('b', { text: s.name }), s.caretaker ? h('span', { class: 'sub', text: ' caretaker' }) : s.joint ? h('span', { class: 'sub', text: ' joint' }) : null),
           h('td', { class: 'l sub', text: fmtLong(s.start) + (s.approx ? ' ≈' : '') }), h('td', { class: 'l sub', text: s.ongoing ? 'now' : fmtLong(s.to) }),
           h('td', { text: tenure(daysBetween(s.start, s.to)) }),
-          h('td', { text: r.n || '–' }), h('td', { text: r.n ? `${r.w}-${r.d}-${r.l}` : '' }), h('td', { text: r.n ? Math.round((100 * r.w) / r.n) + '%' : '' }),
+          h('td', { title: r.histSeasons.length ? `Includes ${r.histSeasons.length} whole league season${r.histSeasons.length > 1 ? 's' : ''} from the club history (${r.histSeasons.join(', ')})` + (r.partSeasons.length ? `; part-seasons not counted (${r.partSeasons.join(', ')})` : '') : r.partSeasons.length ? `Part-seasons not counted (${r.partSeasons.join(', ')})` : null }, r.n ? String(r.n) : '–', r.histSeasons.length ? h('sup', { class: 'sub', text: '*' }) : null), h('td', { text: r.n ? `${r.w}-${r.d}-${r.l}` : '' }), h('td', { text: r.n ? Math.round((100 * r.w) / r.n) + '%' : '' }),
           h('td', null, h('b', { text: r.n ? r.ppg.toFixed(2) : '' })), h('td', { text: r.n ? `${(r.gf / r.n).toFixed(2)}–${(r.ga / r.n).toFixed(2)}` : '' }),
           h('td', { text: Number.isFinite(r.first10) ? r.first10.toFixed(1) : '' }),
           h('td', { text: r.best ? ordinal(r.best) : '' }), h('td', { class: 'l sub', text: r.trophies.join(', ') }));
       })))),
-    h('p', { class: 'note', text: (anyRec ? 'Match records start in 1994/95, when the loaded league results begin. ' : '') + 'Trophies and finishes are credited to the manager in charge when each season ended. ≈ dates known to the year only. Manager dates: ' + (MGR_FROM === 'built-in' ? 'your manager history CSV' : MGR_FROM || 'your manager history CSV') + ' (sources listed per spell in the file).' })));
+    h('p', { class: 'note', text: (anyRec ? 'Records count every match from 1994/95 (league and cups, from the loaded results); before that, * whole league seasons in charge from the club history (league only; a season shared between managers is left out). ' : '') + 'Trophies and finishes are credited to the manager in charge when each season ended. ≈ dates known to the year only. Manager dates: ' + (MGR_FROM === 'built-in' ? 'your manager history CSV' : MGR_FROM || 'your manager history CSV') + ' (sources listed per spell in the file).' })));
 
   if (sel) grid.append(managerDetail(sel, recs.get(sel), list, recs));
 
@@ -248,16 +259,18 @@ function managerDetail(s, r, list, recs) {
   const bar = wdlBar(r.w, r.d, r.l); bar.classList.add('wide');
   c.append(stat([[r.n, 'Matches'], [`${r.w} · ${Math.round((100 * r.w) / r.n)}%`, 'Won'], [r.d, 'Drawn'], [r.l, 'Lost'], [r.ppg.toFixed(2), 'Points a game'], [`${r.gf}–${r.ga}`, 'Goals']]), bar);
   if (Number.isFinite(r.first10) && prev) c.append(h('p', { class: 'note', text: `First 10 matches: ${r.first10.toFixed(1)} points a game, against ${recs.get(prev).last10.toFixed(1)} in ${prev.name}’s last 10.` }));
-  c.append(h('div', { class: 'eyebrow', style: { margin: '10px 0 6px' }, text: 'Every result, in order' }), h('div', { class: 'h2h-strip' }, r.ms.map((x, j) => {
+  if (r.ms.length) c.append(h('div', { class: 'eyebrow', style: { margin: '10px 0 6px' }, text: 'Every result, in order' }), h('div', { class: 'h2h-strip' }, r.ms.map((x, j) => {
     const e = h('span', { class: r.res[j], tabindex: 0 });
     hover(e, () => [{ v: `${fmtLong(x.date)} · ${x.cup ? roundLabel(x.m) : 'League'}`, strong: true }, { v: `${x.me} ${goalsFor(x.m, x.T)}–${goalsAg(x.m, x.T)} ${x.opp} (${x.m.neutral ? 'N' : x.m.home === x.T ? 'H' : 'A'})` }]);
     return e;
   })));
   // Season by season
   const by = {};
+  const H = CLUBHIST[mgrKey(s.club)];
+  r.histSeasons.forEach((season) => { const hs = H.seasons[season]; by[season] = { n: hs.pld, w: hs.w || 0, d: hs.d || 0, l: hs.l || 0, pts: 3 * (hs.w || 0) + (hs.d || 0), hist: true }; });
   r.ms.forEach((x, j) => { const b = (by[x.season] = by[x.season] || { n: 0, w: 0, d: 0, l: 0, pts: 0 }); b.n++; const q = r.res[j]; b[q === 'W' ? 'w' : q === 'D' ? 'd' : 'l']++; b.pts += q === 'W' ? 3 : q === 'D' ? 1 : 0; });
   c.append(h('div', { class: 'tbl-wrap', style: { marginTop: '12px' } }, h('table', null, h('thead', null, h('tr', null, ['Season', 'P', 'W-D-L', 'PPG', 'League finish'].map((t, k) => h('th', { class: k === 0 ? 'l' : '', text: t })))),
-    h('tbody', null, Object.entries(by).map(([season, b]) => { const f = r.finishes.find((x) => x.season === season); return h('tr', { style: { cursor: 'default' } }, h('td', { class: 'l' }, h('b', { text: season })), h('td', { text: b.n }), h('td', { text: `${b.w}-${b.d}-${b.l}` }), h('td', { text: (b.pts / b.n).toFixed(2) }), h('td', { text: f ? ordinal(f.pos) : '' })); })))));
+    h('tbody', null, Object.entries(by).sort((a, b2) => a[0].localeCompare(b2[0])).map(([season, b]) => { const f = r.finishes.find((x) => x.season === season); return h('tr', { style: { cursor: 'default' } }, h('td', { class: 'l' }, h('b', { text: season }), b.hist ? h('span', { class: 'sub', text: ' league' }) : null), h('td', { text: b.n }), h('td', { text: `${b.w}-${b.d}-${b.l}` }), h('td', { text: (b.pts / b.n).toFixed(2) }), h('td', { text: f ? ordinal(f.pos) : '' })); })))));
   return c;
 }
 
