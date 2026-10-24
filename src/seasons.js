@@ -241,27 +241,41 @@ function attendanceCard(grid, key) {
   seasons.forEach((k) => Object.entries(ATT[k]).forEach(([tk, x]) => { clubs[tk] = clubs[tk] || x.name; }));
   const others = Object.keys(clubs).filter((tk) => tk !== key);
   const A = css('--team-a'), G = css('--rule-2');
+  // Clubs picked for comparison (click a club below), each in its own colour
+  const PAL = ['--c1', '--c3', '--c4', '--c5'].map(css);
+  S.attPick = (S.attPick || []).filter((tk) => clubs[tk] && tk !== key);
+  const colOf = (tk) => (tk === key ? A : S.attPick.includes(tk) ? PAL[S.attPick.indexOf(tk) % PAL.length] : G);
+  const toggle = (tk) => { if (tk === key) return; const i = S.attPick.indexOf(tk); if (i >= 0) S.attPick.splice(i, 1); else { S.attPick.push(tk); if (S.attPick.length > PAL.length) S.attPick.shift(); } const y = window.scrollY; render(); window.scrollTo(0, y); };
   const val = (tk, k) => (ATT[k][tk] && ATT[k][tk].att >= 500 ? ATT[k][tk].att : NaN); // 2020/21 was behind closed doors
-  const series = others.map((tk) => ({ name: clubs[tk], color: G, width: 1.2, noDots: true, values: seasons.map((k) => val(tk, k)) }))
-    .concat(clubs[key] ? [{ name: clubs[key], color: A, width: 3, values: seasons.map((k) => val(key, k)) }] : []);
-  const c = card({ title: 'Home attendances', span: true }, `Average league home crowd by season · ${clubs[key] || teamName(S.team)} highlighted${others.length ? ', other clubs in grey' : ''} · from your attendance CSV, FBref and football-data.co.uk`);
+  const line = (tk, width) => ({ name: clubs[tk], color: colOf(tk), width, noDots: true, values: seasons.map((k) => val(tk, k)) });
+  const series = others.filter((tk) => !S.attPick.includes(tk)).map((tk) => line(tk, 1.2))
+    .concat(S.attPick.map((tk) => line(tk, 2.6)))
+    .concat(clubs[key] ? [line(key, 3)] : []);
+  const c = card({ title: 'Home attendances', span: true }, `Average league home crowd by season · ${clubs[key] || teamName(S.team)} in red · click clubs below to highlight up to ${PAL.length} more · from your attendance CSV, FBref and football-data.co.uk`);
+  // Every club with figures, most seasons first
+  const nSeasons = (tk) => seasons.filter((k) => has(val(tk, k))).length;
+  c.append(h('div', { class: 'ask-chips', style: { margin: '0 0 10px' } }, others.slice().sort((a, b) => nSeasons(b) - nSeasons(a) || clubs[a].localeCompare(clubs[b])).map((tk) => {
+    const on = S.attPick.includes(tk);
+    return h('button', { type: 'button', class: 'ask-chip att-chip', 'aria-pressed': String(on), title: `${nSeasons(tk)} seasons with figures`, onclick: () => toggle(tk) }, h('i', { style: { background: on ? colOf(tk) : 'transparent', borderColor: on ? colOf(tk) : 'var(--rule-2)' } }), clubs[tk]);
+  })));
   const box = h('div');
   c.append(box);
   grid.append(c);
   lineChart(box, {
     labels: seasons.map(seasonShort), series, height: 260, zero: false,
     yFmt: (v) => (v >= 1000 ? Math.round(v / 1000) + 'k' : String(Math.round(v))),
-    tipFor: (i) => [{ v: seasons[i], strong: true }].concat(Object.entries(ATT[seasons[i]]).filter(([, x]) => x.att >= 500).sort((a, b) => b[1].att - a[1].att).slice(0, 12).map(([tk, x]) => ({ color: tk === key ? A : G, v: x.att.toLocaleString('en-GB'), l: x.name }))).concat(Object.values(ATT[seasons[i]]).some((x) => x.att < 500) ? [{ v: 'Behind closed doors (Covid)' }] : []),
+    tipFor: (i) => [{ v: seasons[i], strong: true }].concat(Object.entries(ATT[seasons[i]]).filter(([, x]) => x.att >= 500).sort((a, b) => b[1].att - a[1].att).slice(0, 12).map(([tk, x]) => ({ color: colOf(tk), v: x.att.toLocaleString('en-GB'), l: x.name }))).concat(Object.values(ATT[seasons[i]]).some((x) => x.att < 500) ? [{ v: 'Behind closed doors (Covid)' }] : []),
   });
-  c.append(legend([[clubs[key] || teamName(S.team), A, 'line']].concat(others.length ? [['Other clubs', G, 'line']] : [])));
+  c.append(legend([[clubs[key] || teamName(S.team), A, 'line']].concat(S.attPick.map((tk) => [clubs[tk], colOf(tk), 'line']), others.length > S.attPick.length ? [['Other clubs', G, 'line']] : [])));
   const last = seasons.slice().reverse().find((k) => Object.keys(ATT[k]).length >= 3);
   if (last) {
     const rows = Object.entries(ATT[last]).sort((a, b) => b[1].att - a[1].att);
     c.append(h('div', { class: 'tbl-wrap', style: { marginTop: '10px' } }, h('table', null, h('thead', null, h('tr', null, ['#', 'Club', 'Average home crowd ' + last].map((x, i) => h('th', { class: i === 1 ? 'l' : '', text: x })))),
-      h('tbody', null, rows.map(([tk, x], i) => h('tr', { class: tk === key ? 'focus' : '', style: { cursor: 'default' } }, h('td', { text: i + 1 }), h('td', { class: 'l', text: x.name }), h('td', { text: x.att >= 500 ? x.att.toLocaleString('en-GB') : 'closed doors' })))))));
+      h('tbody', null, rows.map(([tk, x], i) => h('tr', { class: tk === key ? 'focus' : '', style: { cursor: tk === key ? 'default' : 'pointer' }, title: tk === key ? null : (S.attPick.includes(tk) ? 'Remove highlight from ' : 'Highlight ') + x.name, onclick: () => toggle(tk) }, h('td', { text: i + 1 }),
+        h('td', { class: 'l' }, S.attPick.includes(tk) ? h('i', { class: 'att-dot', style: { background: colOf(tk) } }) : null, x.name), h('td', { text: x.att >= 500 ? x.att.toLocaleString('en-GB') : 'closed doors' })))))));
   }
   const missing = seasons.length < 10 || others.length < 5;
-  c.append(h('p', { class: 'note', text: (missing ? 'To add every club, paste each season’s attendance table into the Data tab’s FBref box: either FBref’s League Table (the season page, e.g. fbref.com/en/comps/40/2023-2024/2023-2024-Scottish-Premiership-Stats, “Regular season” → Share & Export → Get table as CSV), or the Attendances table from the Wikipedia article for that season (e.g. “2010–11 Scottish Premier League”), selected and copied from the page. Wikipedia goes back further. ' : '') + 'Figures from 1976/77 come from the attendance CSV you supplied (compiled from Wikipedia, European Football Statistics, London Hearts, CelticWiki and others); FBref and football-data.co.uk fill gaps. Before 1995/96 only a few clubs have figures. 2020/21 was played behind closed doors.' }));
+  c.append(h('p', { class: 'note', text: (missing ? 'To add every club, paste each season’s attendance table into the Data tab’s FBref box: either FBref’s League Table (the season page, e.g. fbref.com/en/comps/40/2023-2024/2023-2024-Scottish-Premiership-Stats, “Regular season” → Share & Export → Get table as CSV), or the Attendances table from the Wikipedia article for that season (e.g. “2010–11 Scottish Premier League”), selected and copied from the page. Wikipedia goes back further. ' : '') + 'Figures from 1976/77 come from the attendance CSV you supplied (compiled from Wikipedia, European Football Statistics, London Hearts, CelticWiki and others); FBref and football-data.co.uk fill gaps. Most clubs have figures back to the late 1970s, with a few gaps in early seasons. 2020/21 was played behind closed doors.' }));
 }
 
 // Final league position by season, 1st at the top

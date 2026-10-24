@@ -324,3 +324,7 @@ textarea { width: 100%; font-family: var(--font-mono); font-size: 12px; line-hei
 .md-table td:last-child { text-align: right; white-space: nowrap; }
 .md-edit input[type="text"], .md-edit select { font: inherit; padding: 5px 8px; border: 1px solid var(--rule-2); border-radius: 4px; background: var(--surface); color: var(--ink); width: 100%; min-width: 0; }
 .md-edit td { padding: 4px; }
+.att-chip { display: inline-flex; align-items: center; gap: 6px; }
+.att-chip i { width: 10px; height: 10px; border-radius: 50%; border: 2px solid; flex: none; }
+.att-chip[aria-pressed="true"] { color: var(--ink); border-color: var(--ink-2); font-weight: 600; }
+.att-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; vertical-align: 0; }
